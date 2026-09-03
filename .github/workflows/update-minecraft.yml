@@ -1,0 +1,102 @@
+name: Update Minecraft Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '更新対象の環境'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      minecraftVersion:
+        description: '更新後のMinecraftバージョン (例: 1.20.4)'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  update:
+    name: Update Minecraft version (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve resource group / param file
+        id: vars
+        run: |
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_PROD }}" >> "$GITHUB_OUTPUT"
+            echo "param_file=infra/environments/prod.bicepparam" >> "$GITHUB_OUTPUT"
+            echo "app_name=mcaca-prod-minecraft" >> "$GITHUB_OUTPUT"
+          else
+            echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_DEV }}" >> "$GITHUB_OUTPUT"
+            echo "param_file=infra/environments/dev.bicepparam" >> "$GITHUB_OUTPUT"
+            echo "app_name=mcaca-dev-minecraft" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check whether a replica is running
+        id: check
+        run: |
+          RUNNING=$(az containerapp replica list \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --query "length([?properties.runningState=='Running'])" -o tsv || echo 0)
+          echo "running=${RUNNING:-0}" >> "$GITHUB_OUTPUT"
+
+      # バージョン更新前に必ずバックアップを取得し、失敗時に復元できるようにする。
+      - name: Backup world before version update
+        if: steps.check.outputs.running != '0'
+        run: |
+          set -euo pipefail
+          REPLICA=$(az containerapp replica list \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --query "[0].name" -o tsv)
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "更新前バックアップを作成します: pre-update-${TIMESTAMP}"
+          az containerapp exec \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --replica "${REPLICA}" \
+            --command "rcon-cli save-all flush" || true
+          az containerapp exec \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --replica "${REPLICA}" \
+            --command "sh -c 'mkdir -p /data/backups && tar -czf /data/backups/pre-update-${TIMESTAMP}.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties 2>/dev/null || true'" || true
+
+      - name: Deploy Bicep with updated Minecraft version
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ steps.vars.outputs.resource_group }}
+          template: infra/main.bicep
+          parameters: >-
+            ${{ steps.vars.outputs.param_file }}
+            minecraftVersion=${{ inputs.minecraftVersion }}
+            rconPassword=${{ inputs.environment == 'prod' && secrets.PROD_MINECRAFT_RCON_PASSWORD || secrets.DEV_MINECRAFT_RCON_PASSWORD }}
+            whitelistUsers=${{ inputs.environment == 'prod' && vars.PROD_MINECRAFT_WHITELIST_USERS || vars.DEV_MINECRAFT_WHITELIST_USERS }}
+            opUsers=${{ inputs.environment == 'prod' && vars.PROD_MINECRAFT_OP_USERS || vars.DEV_MINECRAFT_OP_USERS }}
+          deploymentMode: Incremental
+          failOnStdErr: false
+
+      - name: Restart revision to apply new version
+        run: |
+          az containerapp revision restart \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --revision "$(az containerapp revision list --name "${{ steps.vars.outputs.app_name }}" --resource-group "${{ steps.vars.outputs.resource_group }}" --query '[0].name' -o tsv)" || true

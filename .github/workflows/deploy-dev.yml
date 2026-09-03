@@ -1,0 +1,53 @@
+name: Deploy (dev)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to dev
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group exists
+        run: |
+          az group show --name "${{ vars.AZURE_RESOURCE_GROUP_DEV }}" \
+            || az group create --name "${{ vars.AZURE_RESOURCE_GROUP_DEV }}" --location "${{ vars.AZURE_LOCATION }}"
+
+      - name: Deploy Bicep (dev parameters)
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: ${{ vars.AZURE_RESOURCE_GROUP_DEV }}
+          template: infra/main.bicep
+          parameters: >-
+            infra/environments/dev.bicepparam
+            rconPassword=${{ secrets.DEV_MINECRAFT_RCON_PASSWORD }}
+            whitelistUsers=${{ vars.DEV_MINECRAFT_WHITELIST_USERS }}
+            opUsers=${{ vars.DEV_MINECRAFT_OP_USERS }}
+          deploymentMode: Incremental
+          failOnStdErr: false
