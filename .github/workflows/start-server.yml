@@ -1,0 +1,89 @@
+name: Start Minecraft Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '起動対象の環境'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  start:
+    name: Start server (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve resource group / app name
+        id: vars
+        run: |
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_PROD }}" >> "$GITHUB_OUTPUT"
+            echo "app_name=mcaca-prod-minecraft" >> "$GITHUB_OUTPUT"
+          else
+            echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_DEV }}" >> "$GITHUB_OUTPUT"
+            echo "app_name=mcaca-dev-minecraft" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set minReplicas to 1
+        run: |
+          az containerapp update \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --min-replicas 1 \
+            --max-replicas 1
+
+      - name: Wait for replica to become ready
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          echo "レプリカの起動を待機しています..."
+          for i in $(seq 1 60); do
+            RUNNING=$(az containerapp replica list \
+              --name "${{ steps.vars.outputs.app_name }}" \
+              --resource-group "${{ steps.vars.outputs.resource_group }}" \
+              --query "length([?properties.runningState=='Running'])" -o tsv || echo 0)
+            if [ "${RUNNING:-0}" -ge 1 ]; then
+              echo "レプリカが起動しました。"
+              exit 0
+            fi
+            echo "待機中... (${i}/60)"
+            sleep 10
+          done
+          echo "タイムアウト: レプリカが起動しませんでした。" >&2
+          exit 1
+
+      - name: Wait for Minecraft to accept connections
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          FQDN=$(az containerapp show \
+            --name "${{ steps.vars.outputs.app_name }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "接続先: ${FQDN}:25565"
+          for i in $(seq 1 30); do
+            if timeout 3 bash -c "echo > /dev/tcp/${FQDN}/25565" 2>/dev/null; then
+              echo "Minecraftサーバーへ接続できました。"
+              exit 0
+            fi
+            echo "接続確認中... (${i}/30)"
+            sleep 10
+          done
+          echo "警告: 25565ポートへの接続を確認できませんでした。起動中の可能性があるため、少し待ってから再接続してください。" >&2
+          exit 0
