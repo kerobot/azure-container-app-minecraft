@@ -9,7 +9,7 @@ bash等の他シェルを使う場合は、変数代入 (`$VAR = ...`) や行継
 はじめてこのマイクラ環境を試す方でも迷わないように、状況別の進め方を整理しています。
 
 | あなたの状況 | 進め方 |
-|---|---|
+| --- | --- |
 | 一人(少人数)でとにかく試したい。コマンドを1つずつ実行しながら理解したい | **メイン手順 (1章): PowerShellスクリプトで直接デプロイ** |
 | チームで運用したい。`main`ブランチへのpushやworkflow実行だけでデプロイを自動化したい | **選択手順 (2章): GitHub Actions経由** (事前にOIDC設定が必要) |
 | Bicep/Azure CLIの詳細を自分で細かく制御したい上級者 | **選択手順 (3章): Azure CLIを直接実行** |
@@ -206,7 +206,7 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 #### Secrets (リポジトリ or Environment単位)
 
 | 名称 | 用途 |
-|---|---|
+| --- | --- |
 | `AZURE_CLIENT_ID` | OIDC用アプリケーションID |
 | `AZURE_TENANT_ID` | AzureテナントID |
 | `AZURE_SUBSCRIPTION_ID` | サブスクリプションID |
@@ -216,7 +216,7 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 #### Variables
 
 | 名称 | 用途 |
-|---|---|
+| --- | --- |
 | `AZURE_LOCATION` | デプロイ先リージョン (例: japaneast) |
 | `AZURE_RESOURCE_GROUP_DEV` | dev環境のリソースグループ名 |
 | `AZURE_RESOURCE_GROUP_PROD` | prod環境のリソースグループ名 |
@@ -280,7 +280,7 @@ az deployment group create `
 以下のどちらに当てはまるか確認してください。
 
 | 状況 | 推奨アクション |
-|---|---|
+| --- | --- |
 | デプロイが途中で失敗した (一部リソースだけ作成された) | 削除は不要です。`deploymentMode: Incremental` のため、原因を修正して同じデプロイコマンドを再実行すれば、成功済みのリソースはそのまま維持され、失敗した箇所のみ再試行されます |
 | 検証用に作った環境を完全に削除したい、または本当に不要になった | 「5-2. リソースグループごと削除する」または「5-3. 個別リソースのみ削除する」 |
 

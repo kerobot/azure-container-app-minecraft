@@ -19,7 +19,7 @@ itzg-minecraft-serverの現行仕様(2024年時点のAPIバージョン)に基�
 ## 現在のリソース構成 (実装前)
 
 | 項目 | 状態 |
-|---|---|
+| --- | --- |
 | IaC (Bicep/ARM/Terraform等) | なし |
 | GitHub Actions workflow | なし |
 | 運用スクリプト | なし |
@@ -31,7 +31,7 @@ itzg-minecraft-serverの現行仕様(2024年時点のAPIバージョン)に基�
 (値はモジュール実装が正、下表は実装に追従して更新してください)。
 
 | リソース種別 | APIバージョン |
-|---|---|
+| --- | --- |
 | `Microsoft.App/managedEnvironments` | `2026-01-01` |
 | `Microsoft.App/managedEnvironments/storages` | `2026-01-01` |
 | `Microsoft.App/containerApps` | `2026-01-01` |

@@ -9,7 +9,7 @@
 
 ## 構成図 (論理構成)
 
-```
+```text
                         ┌─────────────────────────────────────────┐
                         │         Resource Group (dev/prod)        │
                         │                                           │
@@ -35,7 +35,7 @@
 ## 主要コンポーネント
 
 | コンポーネント | 役割 | Bicepモジュール |
-|---|---|---|
+| --- | --- | --- |
 | Virtual Network | Container Apps EnvironmentのVNet統合先。Storage Accountへのサービスエンドポイントも提供 | `network.bicep` |
 | Log Analytics Workspace | Container Apps Environment/Container Appのログ・メトリクス集約先 | `log-analytics.bicep` |
 | Storage Account + Azure Files | ワールド・設定・ホワイトリスト・operator情報の永続化領域 (`/data`) | `storage.bicep` |
@@ -79,7 +79,7 @@ Azureはロードバランサー (`capp-svc-lb`) とパブリックIP (`capp-svc
 詳細は各要件に対応するモジュール/設定を参照してください。
 
 | 要件 | 実装箇所 |
-|---|---|
+| --- | --- |
 | ホワイトリスト必須 | `minecraft-container-app.bicep` の `ENABLE_WHITELIST`/`ENFORCE_WHITELIST` |
 | ONLINE_MODE有効 | `minecraft-container-app.bicep` の `ONLINE_MODE` |
 | RCON外部非公開 | Ingressに25575番を含めない設計 |
