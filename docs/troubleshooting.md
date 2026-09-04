@@ -1,5 +1,7 @@
 # トラブルシューティング (Troubleshooting)
 
+> 過去に実際に発生した障害の経緯と学びは `docs/incident-records.md` にまとめています。
+
 ## コールドスタート検証
 
 ### 検証目的
@@ -71,6 +73,82 @@ GitHub Variables の `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` も合
 - Storage Accountの `networkAcls` がVNet統合されたサブネットからのアクセスのみを
   許可する設定になっているため、サブネットのサービスエンドポイント (`Microsoft.Storage`)
   が有効になっているか確認してください (`network.bicep` で自動設定済み)。
+- `mount.nfs: access denied by server while mounting` となる場合は、Storage Accountの
+  `supportsHttpsTrafficOnly` (Secure transfer required) が `true` になっていないか確認して
+  ください。Container AppsはNFSの転送時暗号化に対応していないため `false` である必要があります。
+
+### コンテナーがCrashLoopBackOffを繰り返す (java.io.IOException: Permission denied)
+
+```text
+[ServerMain/ERROR]: Failed to start the minecraft server
+java.io.IOException: Permission denied
+    at net.minecraft.util.DirectoryLock.create(DirectoryLock.java:35)
+```
+
+`/data` がSMB(cifs)でマウントされている場合に発生します。Minecraftがワールドの
+`session.lock` を作成できないことが原因で、`mountOptions` の調整では解決しません。
+`docs/architecture.md` の「ストレージにNFSを使う理由」を参照し、Azure Filesの共有を
+NFS 4.1 (Premium FileStorage) で構成してください。
+
+なお、Container AppsのTCP Ingressはバックエンドが異常でもTCPハンドシェイクを成立させるため、
+「ポート25565に接続できる」だけではサーバーの正常性を判断できません。
+`scripts/start-server.ps1` / `scripts/status-server.ps1` はServer List Ping
+(`scripts/lib/minecraft-ping.ps1`) でサーバー本体の応答まで確認します。
+
+### status-server.ps1 が「レプリカは起動しているがステータス応答を返さない」と表示する
+
+レプリカは動いているものの、Minecraftサーバープロセスが起動途中か異常終了している状態です。
+初回起動やバージョン更新直後は数十秒かかることがあるため、まず少し待ってから再実行してください。
+それでも解消しない場合はコンテナーのログを確認します。
+
+```powershell
+az containerapp logs show --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --container minecraft --tail 100
+```
+
+### 「レプリカ0（停止中）」と表示されるのに実際は接続して遊べる
+
+新旧リビジョンが競合してデッドロックしている可能性があります。次のコマンドで確認してください。
+
+```powershell
+az containerapp show --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --query "{latest:properties.latestRevisionName,latestReady:properties.latestReadyRevisionName}" -o json
+```
+
+`latest` と `latestReady` が異なる場合、最新リビジョンが起動できず、旧リビジョンが稼働を
+続けています。コンテナーのログには次のエラーが出ます。
+
+```text
+net.minecraft.util.DirectoryLock$LockException: /data/./world/session.lock: already locked (possibly by other Minecraft instance?)
+```
+
+原因は、旧リビジョンのレプリカがワールドを排他ロックしたまま新リビジョンが起動しようとしたことです。
+`az containerapp update --min-replicas` の実行やデプロイが引き金になります。詳細は
+`docs/architecture.md` の「単一インスタンス制約と『minReplicasを変更しない』運用」を参照してください。
+
+復旧手順:
+
+```powershell
+# 1. 稼働中リビジョンでワールドを保存し、停止する
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+
+# 2. 起動できなかったリビジョンを非アクティブ化する
+az containerapp revision deactivate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <latestRevisionName>
+
+# 3. 改めて起動する
+./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+```
+
+なお `scripts/lib/containerapp.ps1` を経由する運用スクリプトは、この状態を検出すると警告を表示します。
+
+### サーバーが停止しない / スケールインしない
+
+`minReplicas` は0固定で、TCP接続が途絶えてから `scaleCooldownSeconds`
+(dev: 120秒 / prod: 300秒) の経過後にスケールインします。以下を確認してください。
+
+- Minecraftクライアントのサーバー一覧画面を開いたままだとTCP接続が張られ続けます。閉じてください
+- `status-server.ps1` の出力でオンラインプレイヤーが0であること
+- 上記を満たしても停止しない場合は、`scripts/stop-server.ps1` の待機時間を延ばして再実行してください
 
 ### RCON経由のコマンドが失敗する
 

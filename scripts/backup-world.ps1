@@ -46,17 +46,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+. "$PSScriptRoot/lib/containerapp.ps1"
+
 try {
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        throw 'Azure CLI (az) が見つかりません。'
-    }
+    Assert-AzureCli
 
-    $replicas = az containerapp replica list `
-        --name $AppName `
-        --resource-group $ResourceGroupName `
-        --output json | ConvertFrom-Json
+    $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
+    Write-RevisionMismatchWarning -AppInfo $app
 
-    $runningReplica = $replicas | Where-Object { $_.properties.runningState -eq 'Running' } | Select-Object -First 1
+    $runningReplica = Get-RunningReplica -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision
 
     if (-not $runningReplica) {
         throw 'バックアップ対象のレプリカが実行されていません。サーバーを起動してから再実行してください。'

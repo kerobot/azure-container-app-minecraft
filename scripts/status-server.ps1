@@ -5,6 +5,7 @@
 
 .DESCRIPTION
     レプリカ数、実行状態、Ingress FQDN、直近のリビジョン情報を取得して表示します。
+    レプリカが起動している場合は Server List Ping でサーバー本体の応答も確認します。
     読み取り専用のスクリプトであり、リソースへの変更は行いません。
 
 .PARAMETER ResourceGroupName
@@ -28,45 +29,53 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+. "$PSScriptRoot/lib/minecraft-ping.ps1"
+. "$PSScriptRoot/lib/containerapp.ps1"
+
 try {
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        throw 'Azure CLI (az) が見つかりません。'
-    }
+    Assert-AzureCli
 
-    $app = az containerapp show `
-        --name $AppName `
-        --resource-group $ResourceGroupName `
-        --output json | ConvertFrom-Json
+    $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
+    Write-RevisionMismatchWarning -AppInfo $app
 
-    if (-not $app) {
-        throw "Container Appが見つかりません: $AppName ($ResourceGroupName)"
-    }
-
-    $replicas = az containerapp replica list `
-        --name $AppName `
-        --resource-group $ResourceGroupName `
-        --output json | ConvertFrom-Json
-
+    $replicas = Get-ContainerAppReplicas -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision
     $runningCount = @($replicas | Where-Object { $_.properties.runningState -eq 'Running' }).Count
 
     $status = [PSCustomObject]@{
-        AppName       = $app.name
-        FQDN          = $app.properties.configuration.ingress.fqdn
-        Port          = $app.properties.configuration.ingress.exposedPort
-        MinReplicas   = $app.properties.template.scale.minReplicas
-        MaxReplicas   = $app.properties.template.scale.maxReplicas
-        RunningRepl   = $runningCount
-        ActiveRevision = $app.properties.latestRevisionName
-        ProvisioningState = $app.properties.provisioningState
+        AppName           = $app.Name
+        FQDN              = $app.Fqdn
+        Port              = $app.Port
+        MinReplicas       = $app.MinReplicas
+        MaxReplicas       = $app.MaxReplicas
+        RunningRepl       = $runningCount
+        ActiveRevision    = $app.ActiveRevision
+        LatestRevision    = $app.LatestRevision
+        ProvisioningState = $app.ProvisioningState
     }
 
     $status | Format-List
 
     if ($runningCount -gt 0) {
-        Write-Host "サーバーは起動中です。接続先: $($status.FQDN):25565" -ForegroundColor Green
+        # TCPハンドシェイクはIngress(Envoy)がバックエンド異常時でも成立させるため、
+        # Server List Pingでサーバー本体の応答まで確認する。
+        $serverStatus = Get-MinecraftServerStatus -Hostname $status.FQDN -Port 25565
+        if ($serverStatus) {
+            Write-Host "サーバーは起動中です。接続先: $($status.FQDN):25565 ($(Format-MinecraftServerStatus -Status $serverStatus))" -ForegroundColor Green
+        }
+        else {
+            Write-Warning "レプリカは起動していますが、Minecraftサーバーがステータス応答を返しません。起動途中か、異常終了している可能性があります。"
+            Write-Host "  az containerapp logs show --name $AppName --resource-group $ResourceGroupName --container minecraft --tail 100"
+        }
     }
     else {
-        Write-Host 'サーバーは現在停止中です (レプリカ0)。' -ForegroundColor Yellow
+        $crashed = Get-CrashedContainer -Replicas $replicas
+        if ($crashed) {
+            Write-Warning "コンテナーがクラッシュしています (再起動 $($crashed.restartCount) 回): $($crashed.runningStateDetails)"
+            Write-Host "  az containerapp logs show --name $AppName --resource-group $ResourceGroupName --container minecraft --tail 100"
+        }
+        else {
+            Write-Host 'サーバーは現在停止中です (レプリカ0)。' -ForegroundColor Yellow
+        }
     }
 
     exit 0

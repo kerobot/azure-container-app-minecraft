@@ -11,7 +11,8 @@ param vnetAddressPrefix = '10.101.0.0/16'
 param infraSubnetAddressPrefix = '10.101.0.0/23'
 
 param logRetentionInDays = 90
-param fileShareQuotaGiB = 64
+// NFS共有 (Premium FileStorage) の最小容量は100GiB。
+param fileShareQuotaGiB = 100
 
 // 本番環境ではワールドデータ保護のため削除ロックを必ず付与する。
 param enableStorageDeleteLock = true
@@ -33,9 +34,14 @@ param memorySize = '4Gi'
 param javaMaxMemory = '3072M'
 param javaInitMemory = '2048M'
 
+// minReplicasは0固定。起動はTCPスケールルール (scripts/start-server.ps1) に任せる。
 param minReplicas = 0
 param maxReplicas = 1
 param tcpConcurrentConnections = 1
+// 本番は再接続を見越してスケールインを少し遅らせる。
+param scaleCooldownSeconds = 300
+param terminationGracePeriodSeconds = 120
+param startupProbeFailureThreshold = 90
 
 // RCONパスワードはGitHub Environmentのシークレットから環境変数経由で注入する。
 param rconPassword = readEnvironmentVariable('MINECRAFT_RCON_PASSWORD', '')

@@ -22,6 +22,12 @@
 .PARAMETER WhatIf
     実際のデプロイを行わず、変更内容のプレビューのみを表示します。
 
+.PARAMETER ContainerAppName
+    稼働中チェックに使うContainer App名。省略時は 'mcaca-<Environment>-minecraft'。
+
+.PARAMETER SkipRunningCheck
+    デプロイ前の「サーバーが停止しているか」の確認をスキップします。
+
 .EXAMPLE
     ./scripts/deploy.ps1 -Environment dev -ResourceGroupName rg-minecraft-dev -WhatIf
 
@@ -47,11 +53,18 @@ param(
     [string]$WhitelistUsers,
 
     [Parameter(Mandatory = $false)]
-    [string]$OpUsers
+    [string]$OpUsers,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ContainerAppName,
+
+    [switch]$SkipRunningCheck
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+. "$PSScriptRoot/lib/containerapp.ps1"
 
 function Get-PlainTextFromSecureString {
     param([SecureString]$Secure)
@@ -105,6 +118,27 @@ try {
 
     $whitelist = if ($WhitelistUsers) { $WhitelistUsers } else { $env:MINECRAFT_WHITELIST_USERS }
     $ops = if ($OpUsers) { $OpUsers } else { $env:MINECRAFT_OP_USERS }
+
+    # 新リビジョンと旧リビジョンが同時に起動すると、Minecraftがワールドの session.lock を
+    # 取得できず起動に失敗する。デプロイ前にサーバーが停止していることを確認する。
+    if (-not $WhatIfPreference -and -not $SkipRunningCheck) {
+        $appName = if ($ContainerAppName) { $ContainerAppName } else { "mcaca-$Environment-minecraft" }
+
+        $existing = az containerapp show --name $appName --resource-group $ResourceGroupName --output json --only-show-errors 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existing)) {
+            $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $appName
+            $running = Get-RunningReplica -ResourceGroupName $ResourceGroupName -AppName $appName -RevisionName $app.ActiveRevision
+            if ($running) {
+                throw @"
+サーバーが起動中のためデプロイを中止しました (レプリカ: $($running.name))。
+新旧リビジョンが同時に起動するとワールドの session.lock が競合し、新しいリビジョンが起動できません。
+先に停止してから再実行してください:
+  ./scripts/stop-server.ps1 -ResourceGroupName $ResourceGroupName -AppName $appName
+確認済みで続行する場合は -SkipRunningCheck を指定してください。
+"@
+            }
+        }
+    }
 
     $overrideParams = @(
         "rconPassword=$plainRcon"

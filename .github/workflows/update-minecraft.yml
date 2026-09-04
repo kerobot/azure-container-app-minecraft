@@ -73,36 +73,24 @@ jobs:
           check_required "whitelist users" "$WHITELIST_USERS"
           exit "$missing"
 
-      - name: Check whether a replica is running
-        id: check
-        run: |
-          RUNNING=$(az containerapp replica list \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --query "length([?properties.runningState=='Running'])" -o tsv)
-          echo "running=${RUNNING:-0}" >> "$GITHUB_OUTPUT"
-
       # バージョン更新前に必ずバックアップを取得し、失敗時に復元できるようにする。
-      - name: Backup world before version update
-        if: steps.check.outputs.running != '0'
+      # そのうえで停止しておかないと、新旧リビジョンがワールドの session.lock を奪い合う。
+      - name: Backup and stop server before version update
+        shell: pwsh
+        timeout-minutes: 20
+        env:
+          RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}
+          APP_NAME: ${{ steps.vars.outputs.app_name }}
         run: |
-          set -euo pipefail
-          REPLICA=$(az containerapp replica list \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --query "[0].name" -o tsv)
-          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
-          echo "更新前バックアップを作成します: pre-update-${TIMESTAMP}"
-          az containerapp exec \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --replica "${REPLICA}" \
-            --command "rcon-cli save-all flush"
-          az containerapp exec \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --replica "${REPLICA}" \
-            --command "sh -c 'mkdir -p /data/backups && tar -czf /data/backups/pre-update-${TIMESTAMP}.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties'"
+          $status = ./scripts/status-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME | Out-String
+          Write-Host $status
+          if ($status -match 'RunningRepl\s*:\s*[1-9]') {
+            ./scripts/backup-world.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Label "pre-update-${{ inputs.minecraftVersion }}"
+            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME
+          }
+          else {
+            Write-Host 'サーバーは停止しています。バックアップ対象がないためスキップします。'
+          }
 
       - name: Deploy Bicep with updated Minecraft version
         uses: azure/arm-deploy@v2
@@ -120,9 +108,12 @@ jobs:
           deploymentMode: Incremental
           failOnStdErr: false
 
-      - name: Restart revision to apply new version
+      # minReplicas=0 のため、次回のTCP接続時に新しいリビジョンが新バージョンで起動します。
+      - name: Verify new version
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}
+          APP_NAME: ${{ steps.vars.outputs.app_name }}
         run: |
-          az containerapp revision restart \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --revision "$(az containerapp revision list --name "${{ steps.vars.outputs.app_name }}" --resource-group "${{ steps.vars.outputs.resource_group }}" --query '[0].name' -o tsv)" || true
+          ./scripts/start-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME

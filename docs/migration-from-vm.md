@@ -37,26 +37,24 @@ tar -czf migration.tar.gz world world_nether world_the_end whitelist.json ops.js
 ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft
 ```
 
-Azure Filesへのデータアップロードは以下のいずれかの方法で行います。
+ファイル共有はNFS 4.1で構成されており、AzCopy / Azure Storage Explorer / `az storage file`
+といったREST API経由のアクセスは利用できません (アカウントキーによるアクセスも無効です)。
+データの持ち込みは、起動中のコンテナー経由で行います。
 
-- **AzCopy / Azure Storage Explorer**: Storage Account (ファイル共有) へ直接
-  `migration.tar.gz` をアップロードし、`az containerapp exec` でコンテナー内に
-  展開する。
-- **az containerapp exec + curl/scp**: 一時的にBlob Storageの
-  SASリンク経由でファイルを取得し、コンテナー内で展開する。
+- **`az containerapp exec` + curl**: Blob StorageのSASリンク等から
+  `migration.tar.gz` をコンテナー内へダウンロードし、`/data` 配下に展開する。
 
 ```powershell
-# 例: Azure Files共有へ直接アップロード (Storage Accountのネットワーク制限に注意)
-az storage file upload `
-  --account-name <storageAccountName> `
-  --share-name minecraft-data `
-  --source migration.tar.gz `
-  --path migration.tar.gz
+# 例: 実行中のレプリカ内でアーカイブを取得する
+$replica = az containerapp replica list --name mcaca-prod-minecraft --resource-group rg-minecraft-prod `
+  --query "[?properties.runningState=='Running'].name | [0]" -o tsv
+az containerapp exec --name mcaca-prod-minecraft --resource-group rg-minecraft-prod --replica $replica `
+  --command "sh -c 'curl -fsSL \"<BLOB_SAS_URL>\" -o /data/migration.tar.gz'"
 ```
 
 > 補足: Storage Accountの `networkAcls` はVNet統合されたサブネットからのみアクセスを
-> 許可する設定のため、ローカル端末から直接アップロードする場合は一時的に
-> 自端末のIPを許可するか、Azure Cloud Shell (VNet内)経由でのアップロードを検討してください。
+> 許可する設定です。NFS共有は同一VNet内のクライアントからのみマウントできるため、
+> ローカル端末から直接マウントすることはできません。
 
 ### 4. コンテナー内でアーカイブを展開する
 

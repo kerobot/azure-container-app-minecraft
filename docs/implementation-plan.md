@@ -22,7 +22,7 @@
   - [x] ホワイトリスト・opsのパラメータ化
 
 - [x] **フェーズ4: 永続ストレージ**
-  - [x] Azure Files共有の作成、Container Apps Environmentへの登録
+  - [x] Azure Files共有 (NFS 4.1 / Premium FileStorage) の作成、Container Apps Environmentへの登録
   - [x] `/data` へのボリュームマウント
   - [x] 削除防止ロックの付与 (再デプロイでデータが削除されないこと)
 

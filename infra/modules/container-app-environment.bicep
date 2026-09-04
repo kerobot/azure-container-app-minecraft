@@ -1,6 +1,7 @@
 // container-app-environment.bicep
-// VNet統合されたContainer Apps (Consumption) 環境を作成し、Azure Filesを
+// VNet統合されたContainer Apps (Consumption) 環境を作成し、Azure Files (NFS 4.1) を
 // マウント用ストレージとして登録し、Log Analyticsへログを送信します。
+// NFSマウントはVNet統合された環境でのみ利用でき、アカウントキーを必要としません。
 
 @description('リソースの共通名プレフィックス')
 param namePrefix string
@@ -14,11 +15,11 @@ param infraSubnetId string
 @description('Log Analytics workspace名 (同一リソースグループ内に存在すること)')
 param logAnalyticsWorkspaceName string
 
-@description('Azure Filesをマウントするためのストレージアカウント名 (同一リソースグループ内に存在すること)')
-param storageAccountName string
+@description('NFSマウント先のサーバーアドレス (<account>.file.core.windows.net)')
+param nfsServer string
 
-@description('Azure Filesの共有名')
-param fileShareName string
+@description('NFS共有パス (/<account>/<share> 形式)')
+param nfsShareName string
 
 @description('Container Apps Environmentへ登録するAzure Filesストレージ定義名')
 param storageDefinitionName string = 'minecraft-data'
@@ -26,14 +27,9 @@ param storageDefinitionName string = 'minecraft-data'
 @description('共通タグ')
 param tags object = {}
 
-// ログ共有キー・ストレージアクセスキーはBicep出力へ含めず、
-// このモジュール内でのみ既存リソース参照から取得して利用する。
+// ログ共有キーはBicep出力へ含めず、このモジュール内でのみ既存リソース参照から取得して利用する。
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' existing = {
   name: logAnalyticsWorkspaceName
-}
-
-resource storageAccount 'Microsoft.Storage/storageAccounts@2026-04-01' existing = {
-  name: storageAccountName
 }
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = {
@@ -56,14 +52,13 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = {
   }
 }
 
-resource azureFilesStorage 'Microsoft.App/managedEnvironments/storages@2026-01-01' = {
+resource nfsAzureFilesStorage 'Microsoft.App/managedEnvironments/storages@2026-01-01' = {
   parent: managedEnvironment
   name: storageDefinitionName
   properties: {
-    azureFile: {
-      accountName: storageAccountName
-      accountKey: storageAccount.listKeys().keys[0].value
-      shareName: fileShareName
+    nfsAzureFile: {
+      server: nfsServer
+      shareName: nfsShareName
       accessMode: 'ReadWrite'
     }
   }
@@ -76,7 +71,7 @@ output environmentId string = managedEnvironment.id
 output environmentName string = managedEnvironment.name
 
 @description('マウント用ストレージ定義名')
-output storageDefinitionName string = azureFilesStorage.name
+output storageDefinitionName string = nfsAzureFilesStorage.name
 
 @description('Container Apps Environmentの静的IP')
 output staticIp string = managedEnvironment.properties.staticIp

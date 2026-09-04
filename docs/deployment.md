@@ -31,6 +31,12 @@ bash等の他シェルを使う場合は、変数代入 (`$VAR = ...`) や行継
 - 選択手順 (2章: GitHub Actions経由) を使う場合のみ、Azure ADアプリケーション登録と
   フェデレーション資格情報(OIDC)の設定が事前に必要です
 
+> **コストに関する注意**: ワールドデータはAzure FilesのNFS 4.1共有へ保存します。NFSは
+> **Premium FileStorage** でのみ利用でき、共有の最小容量は **100GiB** です。この分は
+> サーバーを停止していても継続して課金されます (Container App自体は `minReplicas=0` の間は
+> 課金されません)。NFSが必要な理由は `docs/architecture.md` の
+> 「ストレージにNFSを使う理由」を参照してください。
+
 ## 1. メイン手順: PowerShellスクリプトで直接デプロイ
 
 手元のPowerShellから、Azureへのログイン→デプロイ→サーバー起動→接続確認までを行います。
@@ -97,6 +103,19 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 - `-WhitelistUsers` : サーバーへの接続を許可するプレイヤー名 (カンマ区切り)
 - `-OpUsers` : op(管理者)権限を与えるプレイヤー名 (カンマ区切り)
 
+> **2回目以降のデプロイは、先にサーバーを停止してください。**
+> デプロイは新しいリビジョンを作成しますが、旧リビジョンが稼働したままだと
+> ワールドの `session.lock` が競合し、新リビジョンが起動できなくなります。
+> `deploy.ps1` は稼働中を検知するとデプロイを中止します (確認済みで続行する場合は
+> `-SkipRunningCheck`)。背景は `docs/architecture.md` の
+> 「単一インスタンス制約と『minReplicasを変更しない』運用」を参照してください。
+>
+> ```powershell
+> ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+> ```
+
+prod環境へデプロイする場合は、以下の点が追加で異なります。
+
 > **prod環境の場合**: `-Environment prod` とprod用のリソースグループ名を指定します。
 >
 > ```powershell
@@ -109,7 +128,8 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 
 ### 1-6. サーバーの起動と接続確認
 
-デプロイ直後は `minReplicas=0` のためサーバーは起動していません。以下で明示的に起動します。
+デプロイ直後は `minReplicas=0` のためサーバーは起動していません。以下で起動します。
+このスクリプトはTCP接続を張ってスケールルールを発火させるため、新しいリビジョンは作られません。
 
 ```powershell
 ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
@@ -122,7 +142,8 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 ```
 
 表示されたIngress FQDNとポート25565を使い、Minecraftクライアントから接続を確認してください。
-使い終わったら以下でサーバーを停止します(無操作放置でも一定時間後に自動でスケールインします)。
+使い終わったら以下でワールドを保存し、スケールインを待ちます
+(無操作放置でも接続が途絶えて一定時間後に自動でスケールインします)。
 
 ```powershell
 ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
@@ -272,7 +293,7 @@ az deployment group create `
 
 初回デプロイ直後は `minReplicas=0` のため、レプリカは起動していません。
 サーバーへ接続するには `scripts/start-server.ps1` (またはGitHub Actionsの`start-server.yml`)、
-もしくはTCP接続による自動起動を利用してください。
+もしくはMinecraftクライアントからのTCP接続による自動起動を利用してください。
 
 ## 5. 作成したリソースの削除 (クリーンアップ)
 
@@ -286,8 +307,8 @@ az deployment group create `
 
 > 注意: 以下の削除操作はワールドデータ(Azure Files上の `world` 等)を含めて完全に
 > 失われます。データを残したい場合は、削除前に `scripts/backup-world.ps1` でバックアップを
-> 取得し、バックアップファイル自体を別の場所(手元の端末やAzure Files以外のストレージ)へ
-> ダウンロードしておいてください。
+> 取得し、`az containerapp exec` でバックアップファイル自体を別の場所 (Blob Storage等) へ
+> 退避しておいてください。NFS共有は `az storage file` や AzCopy で直接ダウンロードできません。
 
 ### 5-1. 削除防止ロックの解除 (必要な場合のみ)
 

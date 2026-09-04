@@ -2,6 +2,11 @@
 // itzg/minecraft-server を実行するContainer Appを作成します。
 // 通常時はminReplicas=0でスケールインし、TCP接続をトリガーに起動します。
 // activeRevisionsModeはSingleとし、常に単一リビジョンのみが稼働するようにします。
+//
+// Minecraftはワールドを session.lock で排他ロックするため、新旧リビジョンが一瞬でも
+// 同時に起動すると DirectoryLock$LockException で新しい方が起動できません。
+// そのため minReplicas は常に0のまま運用し、起動はTCPスケールルールに任せます
+// (スクリプトから minReplicas を変更すると新しいリビジョンが生成され、この衝突を引き起こします)。
 
 @description('リソースの共通名プレフィックス')
 param namePrefix string
@@ -45,7 +50,7 @@ param javaMaxMemory string = '1536M'
 @description('JVMの初期ヒープサイズ (itzg INIT_MEMORY環境変数, 例: 1024M)')
 param javaInitMemory string = '1024M'
 
-@description('最小レプリカ数。通常時は0にしてスケールインする')
+@description('最小レプリカ数。リビジョン間のワールド衝突を避けるため0固定で運用すること')
 @minValue(0)
 @maxValue(1)
 param minReplicas int = 0
@@ -57,6 +62,21 @@ param maxReplicas int = 1
 
 @description('TCPスケールルールの同時接続数しきい値')
 param tcpConcurrentConnections int = 1
+
+@description('接続が途絶えてからスケールインするまでの待機秒数')
+@minValue(60)
+@maxValue(3600)
+param scaleCooldownSeconds int = 120
+
+@description('コンテナー停止時にワールド保存を待つ猶予秒数')
+@minValue(30)
+@maxValue(600)
+param terminationGracePeriodSeconds int = 90
+
+@description('Startupプローブの失敗許容回数。periodSeconds(10秒)との積が起動の許容時間になる')
+@minValue(6)
+@maxValue(240)
+param startupProbeFailureThreshold int = 60
 
 @description('共通タグ')
 param tags object = {}
@@ -106,10 +126,6 @@ var minecraftEnv = concat(
     {
       name: 'RCON_PASSWORD'
       secretRef: 'rcon-password'
-    }
-    {
-      name: 'STOP_SERVER_ANNOUNCE_DELAY'
-      value: '60'
     }
   ],
   empty(opUsers)
@@ -166,14 +182,35 @@ resource minecraftApp 'Microsoft.App/containerApps@2026-01-01' = {
             }
           ]
           probes: [
+            // Startup・Readinessも必ず明示する。一部だけ定義すると残りはAzure既定
+            // (Startupはperiod 1秒) となり、Minecraftの起動時間に合わない。
+            {
+              type: 'Startup'
+              tcpSocket: {
+                port: 25565
+              }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: startupProbeFailureThreshold
+            }
+            {
+              type: 'Readiness'
+              tcpSocket: {
+                port: 25565
+              }
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 6
+            }
             {
               type: 'Liveness'
               tcpSocket: {
                 port: 25565
               }
-              initialDelaySeconds: 60
               periodSeconds: 30
-              failureThreshold: 10
+              timeoutSeconds: 5
+              failureThreshold: 5
             }
           ]
         }
@@ -181,13 +218,14 @@ resource minecraftApp 'Microsoft.App/containerApps@2026-01-01' = {
       volumes: [
         {
           name: 'minecraft-data'
-          storageType: 'AzureFile'
+          storageType: 'NfsAzureFile'
           storageName: storageDefinitionName
         }
       ]
       scale: {
         minReplicas: minReplicas
         maxReplicas: maxReplicas
+        cooldownPeriod: scaleCooldownSeconds
         rules: [
           {
             name: 'tcp-scale-rule'
@@ -199,6 +237,7 @@ resource minecraftApp 'Microsoft.App/containerApps@2026-01-01' = {
           }
         ]
       }
+      terminationGracePeriodSeconds: terminationGracePeriodSeconds
     }
   }
 }

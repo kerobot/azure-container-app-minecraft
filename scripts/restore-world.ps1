@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     /data/backups 配下の指定したバックアップアーカイブを展開してワールドを復元します。
-    データ不整合を避けるため、復元前にサーバーを停止(minReplicas=0)することを強く推奨します。
+    展開には起動中レプリカへの exec が必要なため、サーバーを起動したうえで
+    プレイヤーの接続を禁止し、-Force を指定して実行してください。
     -DryRun を指定すると実際のコマンドは実行せず、実行予定の内容のみ表示します。
 
 .PARAMETER ResourceGroupName
@@ -46,17 +47,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+. "$PSScriptRoot/lib/containerapp.ps1"
+
 try {
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        throw 'Azure CLI (az) が見つかりません。'
-    }
+    Assert-AzureCli
 
-    $replicas = az containerapp replica list `
-        --name $AppName `
-        --resource-group $ResourceGroupName `
-        --output json | ConvertFrom-Json
+    $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
+    Write-RevisionMismatchWarning -AppInfo $app
 
-    $runningReplica = $replicas | Where-Object { $_.properties.runningState -eq 'Running' } | Select-Object -First 1
+    $runningReplica = Get-RunningReplica -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision
 
     if ($runningReplica -and -not $Force -and -not $DryRun) {
         throw "復元には起動中レプリカへのexecが必要です。プレイヤー接続を禁止し、復元リスクを承認したうえで -Force を指定してください。"

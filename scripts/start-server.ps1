@@ -1,11 +1,16 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Container Apps上のMinecraftサーバーを起動します(minReplicasを1に変更)。
+    Container Apps上のMinecraftサーバーを起動します(TCPスケールルールを誘発)。
 
 .DESCRIPTION
-    az containerapp update で minReplicas=1 を設定し、レプリカが起動して
-    Minecraft(TCP 25565)へ接続可能になるまで待機します。
+    ポート25565へのTCP接続を保持してTCPスケールルールを発火させ、レプリカが0→1へ
+    スケールアウトするのを待ちます。続いてServer List Pingでサーバー本体の応答を確認します。
+
+    minReplicas は変更しません。minReplicas の変更はContainer Appのテンプレート変更にあたり、
+    実行のたびに新しいリビジョンが生成されます。Container Appsは新旧リビジョンを重ねて
+    切り替えるため、ワールドを session.lock で排他ロックするMinecraftでは
+    'already locked' による起動失敗を引き起こします。
 
 .PARAMETER ResourceGroupName
     Container Appが存在するリソースグループ名。
@@ -14,15 +19,12 @@
     Container App名。
 
 .PARAMETER TimeoutSeconds
-    接続確認のタイムアウト秒数。
-
-.PARAMETER WhatIf
-    実際の変更を行わず、実行内容のみ表示します。
+    起動完了までのタイムアウト秒数。
 
 .EXAMPLE
     ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
@@ -37,86 +39,65 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+. "$PSScriptRoot/lib/minecraft-ping.ps1"
+. "$PSScriptRoot/lib/containerapp.ps1"
+
+$trigger = $null
+
 try {
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        throw 'Azure CLI (az) が見つかりません。'
+    Assert-AzureCli
+
+    $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
+    Write-RevisionMismatchWarning -AppInfo $app
+
+    if ([string]::IsNullOrWhiteSpace($app.Fqdn)) {
+        throw "Ingress FQDNを取得できませんでした: $AppName"
     }
 
-    if ($PSCmdlet.ShouldProcess($AppName, 'minReplicasを1に設定')) {
-        Write-Host "minReplicasを1に設定します: $AppName" -ForegroundColor Cyan
-        az containerapp update `
-            --name $AppName `
-            --resource-group $ResourceGroupName `
-            --min-replicas 1 `
-            --max-replicas 1 | Out-Null
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Container Appの更新に失敗しました (終了コード: $LASTEXITCODE)"
-        }
-    }
-    else {
-        Write-Host '(WhatIf) minReplicasを1に設定します。' -ForegroundColor Yellow
+    $serverStatus = Get-MinecraftServerStatus -Hostname $app.Fqdn -Port 25565
+    if ($serverStatus) {
+        Write-Host "サーバーは既に起動しています: $($app.Fqdn):25565 ($(Format-MinecraftServerStatus -Status $serverStatus))" -ForegroundColor Green
         exit 0
+    }
+
+    Write-Host "TCP接続でスケールアウトを誘発します: $($app.Fqdn):25565" -ForegroundColor Cyan
+    # スケールルールは同時接続数を見るため、起動が終わるまで接続を張り続ける。
+    $trigger = [System.Net.Sockets.TcpClient]::new()
+    if (-not $trigger.ConnectAsync($app.Fqdn, 25565).Wait(30000)) {
+        throw "ポート25565へ接続できませんでした: $($app.Fqdn)"
     }
 
     Write-Host 'レプリカの起動を待機しています...' -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $replicaRunning = $false
+
     while ((Get-Date) -lt $deadline) {
-        $replicas = az containerapp replica list `
-            --name $AppName `
-            --resource-group $ResourceGroupName `
-            --output json | ConvertFrom-Json
+        $serverStatus = Get-MinecraftServerStatus -Hostname $app.Fqdn -Port 25565
+        if ($serverStatus) { break }
 
-        if ($replicas | Where-Object { $_.properties.runningState -eq 'Running' }) {
-            $replicaRunning = $true
-            break
+        $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
+        $replicas = Get-ContainerAppReplicas -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision
+        $crashed = Get-CrashedContainer -Replicas $replicas
+        if ($crashed) {
+            throw "コンテナーが繰り返しクラッシュしています (再起動 $($crashed.restartCount) 回): $($crashed.runningStateDetails)`n" +
+                "  az containerapp logs show --name $AppName --resource-group $ResourceGroupName --container minecraft --tail 100"
         }
-        Write-Host '待機中...'
+
+        Write-Host "待機中... (レプリカ: $(@($replicas).Count), リビジョン: $($app.ActiveRevision))"
         Start-Sleep -Seconds 10
     }
 
-    if (-not $replicaRunning) {
-        throw 'タイムアウト: レプリカが起動しませんでした。'
-    }
-    Write-Host 'レプリカが起動しました。' -ForegroundColor Green
-
-    $fqdn = az containerapp show `
-        --name $AppName `
-        --resource-group $ResourceGroupName `
-        --query 'properties.configuration.ingress.fqdn' -o tsv
-
-    Write-Host "Minecraftサーバーへの接続を確認しています: ${fqdn}:25565" -ForegroundColor Cyan
-    $connected = $false
-    $connectDeadline = (Get-Date).AddSeconds([Math]::Min($TimeoutSeconds, 300))
-    while ((Get-Date) -lt $connectDeadline) {
-        try {
-            $client = New-Object System.Net.Sockets.TcpClient
-            $task = $client.ConnectAsync($fqdn, 25565)
-            if ($task.Wait(3000) -and $client.Connected) {
-                $connected = $true
-                $client.Close()
-                break
-            }
-            $client.Close()
-        }
-        catch {
-            # 接続失敗時は待機して再試行する。
-        }
-        Write-Host '接続確認中...'
-        Start-Sleep -Seconds 10
+    if (-not $serverStatus) {
+        throw "タイムアウト: Minecraftサーバーがステータス応答を返しませんでした ($($app.Fqdn):25565)`n" +
+            "  az containerapp logs show --name $AppName --resource-group $ResourceGroupName --container minecraft --tail 100"
     }
 
-    if ($connected) {
-        Write-Host "Minecraftサーバーに接続できます: ${fqdn}:25565" -ForegroundColor Green
-        exit 0
-    }
-    else {
-        Write-Warning "接続確認がタイムアウトしましたが、サーバー起動処理中の可能性があります。少し待ってから再度接続してください: ${fqdn}:25565"
-        exit 0
-    }
+    Write-Host "Minecraftサーバーが応答しました: $($app.Fqdn):25565 ($(Format-MinecraftServerStatus -Status $serverStatus))" -ForegroundColor Green
+    exit 0
 }
 catch {
     Write-Error "エラーが発生しました: $($_.Exception.Message)"
     exit 1
+}
+finally {
+    if ($trigger) { $trigger.Dispose() }
 }

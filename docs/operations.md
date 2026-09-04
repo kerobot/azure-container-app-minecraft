@@ -1,5 +1,10 @@
 # 運用手順 (Operations)
 
+> **前提**: `minReplicas` は常に0固定で運用します。起動・停止で `minReplicas` を変更すると
+> 新しいリビジョンが生成され、新旧リビジョンがワールドの `session.lock` を奪い合って
+> デッドロックします。詳細は `docs/architecture.md` の
+> 「単一インスタンス制約と『minReplicasを変更しない』運用」を参照してください。
+
 ## サーバーの起動
 
 ### 方法1: TCP接続による自動起動 (scale-to-zeroからの自動復帰)
@@ -14,7 +19,8 @@ MinecraftクライアントからサーバーIPへ接続すると、TCPスケー
 
 1. GitHub リポジトリの Actions タブから `Start Minecraft Server` workflowを選択
 2. `Run workflow` から対象環境 (`dev`/`prod`) を選択して実行
-3. レプリカの起動、TCP 25565への接続確認まで自動的に待機します
+3. workflowは `scripts/start-server.ps1` を呼び出し、レプリカの起動と
+   Minecraftサーバーのステータス応答 (Server List Ping) まで確認します
 
 workflowは `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` のGitHub Variablesを参照します。
 `namePrefix` を変更した場合は、生成されるContainer App名 (`<namePrefix>-minecraft`) に合わせてください。
@@ -25,16 +31,28 @@ workflowは `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` のGitHub Varia
 ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 ```
 
+このスクリプトはポート25565へTCP接続を張って保持し、スケールルールを発火させます。
+`minReplicas` は変更しないため、新しいリビジョンは生成されません。
+
+レプリカが起動した後、Server List Pingでサーバー本体の応答を確認します。
+Container AppsのTCP Ingressはバックエンドが異常でもTCPハンドシェイクを成立させるため、
+「ポートに接続できる」だけでは正常性を判断できないからです。
+応答が得られない場合や、コンテナーがCrashLoopBackOffを繰り返している場合はエラー終了します。
+
 ## サーバーの停止
 
-全員が退出した後、Container Appsの `minReplicas=0` により一定時間の無通信を経て
-自動的にスケールインされます。ただし、確実にワールドを保存してから停止したい場合は
-以下の明示的な停止手順を利用してください。
+全員が退出してTCP接続が途絶えると、`scaleCooldownSeconds`
+(dev: 120秒 / prod: 300秒) の経過後に自動的にスケールインされます。
+確実にワールドを保存してから停止したい場合は以下の手順を利用してください。
+
+> Minecraftクライアントのサーバー一覧画面を開いたままだとTCP接続が継続し、
+> スケールインしません。停止したいときはクライアントを閉じてください。
 
 ### GitHub Actions
 
-`Stop Minecraft Server` workflowを実行してください。実行中のレプリカがある場合、
-`rcon-cli save-all flush` によるワールド保存後にminReplicasを0へ変更します。
+`Stop Minecraft Server` workflowを実行してください。workflowは `scripts/stop-server.ps1` を
+呼び出し、実行中のレプリカがある場合は `rcon-cli save-all flush` でワールドを保存したうえで
+スケールインの完了を待ちます。
 
 ### PowerShellスクリプト
 
@@ -42,14 +60,17 @@ workflowは `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` のGitHub Varia
 ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 ```
 
+待機を行わずに保存だけして終了したい場合は `-SkipWait` を指定してください。
+
 ## 状態確認
 
 ```powershell
 ./scripts/status-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 ```
 
-レプリカ数、Ingress FQDN、稼働状態などが表示されます。上記の `mcaca-dev-minecraft` は
-既定の `namePrefix` を使った場合の例です。
+レプリカ数、Ingress FQDN、稼働状態などが表示されます。レプリカが起動している場合は
+Server List Pingでサーバー本体の応答 (バージョン・接続人数) も確認します。
+上記の `mcaca-dev-minecraft` は既定の `namePrefix` を使った場合の例です。
 
 ## ホワイトリスト/op権限の変更
 

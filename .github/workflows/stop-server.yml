@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -59,38 +62,11 @@ jobs:
           check_required "app_name" "$APP_NAME"
           exit "$missing"
 
-      - name: Check whether a replica is running
-        id: check
+      - name: Stop server
+        shell: pwsh
+        timeout-minutes: 10
+        env:
+          RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}
+          APP_NAME: ${{ steps.vars.outputs.app_name }}
         run: |
-          RUNNING=$(az containerapp replica list \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --query "length([?properties.runningState=='Running'])" -o tsv)
-          echo "running=${RUNNING:-0}" >> "$GITHUB_OUTPUT"
-
-      - name: Save world (save-all flush) before stopping
-        if: steps.check.outputs.running != '0'
-        run: |
-          set -euo pipefail
-          REPLICA=$(az containerapp replica list \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --query "[0].name" -o tsv)
-          echo "ワールドデータをフラッシュ保存します (replica: ${REPLICA})"
-          # itzg/minecraft-server イメージに同梱の rcon-cli を使い、コンテナー内部からのみ
-          # RCON経由でセーブコマンドを発行する。RCONは外部には公開していない。
-          az containerapp exec \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --replica "${REPLICA}" \
-            --command "rcon-cli save-all flush" || echo "警告: rcon-cliによる保存に失敗しました。コンテナー停止時の自動セーブに委ねます。"
-          # 保存が完了するまで少し待機する。
-          sleep 15
-
-      - name: Set minReplicas to 0
-        run: |
-          az containerapp update \
-            --name "${{ steps.vars.outputs.app_name }}" \
-            --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --min-replicas 0 \
-            --max-replicas 1
+          ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME

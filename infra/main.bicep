@@ -26,8 +26,9 @@ param infraSubnetAddressPrefix string = '10.100.0.0/23'
 @description('Log Analyticsのログ保持日数')
 param logRetentionInDays int = 30
 
-@description('Minecraftデータ用ファイル共有の割り当て容量(GiB)')
-param fileShareQuotaGiB int = 64
+@description('Minecraftデータ用ファイル共有の割り当て容量(GiB)。NFS(Premium FileStorage)のため最小100GiB')
+@minValue(100)
+param fileShareQuotaGiB int = 100
 
 @description('ストレージアカウントに削除防止ロックを付与するか')
 param enableStorageDeleteLock bool = true
@@ -62,18 +63,27 @@ param javaMaxMemory string = '1536M'
 @description('JVMの初期ヒープサイズ')
 param javaInitMemory string = '1024M'
 
-@description('通常時の最小レプリカ数 (要件により0固定を推奨)')
+@description('通常時の最小レプリカ数。リビジョン間のワールド衝突を避けるため0固定で運用すること')
 @minValue(0)
 @maxValue(1)
 param minReplicas int = 0
 
-@description('最大レプリカ数 (要件により1固定)')
+@description('最大レプリカ数 (要件によ1固定)')
 @minValue(1)
 @maxValue(1)
 param maxReplicas int = 1
 
 @description('TCPスケールルールの同時接続数しきい値')
 param tcpConcurrentConnections int = 1
+
+@description('接続が途絶えてからスケールインするまでの待機秒数')
+param scaleCooldownSeconds int = 120
+
+@description('コンテナー停止時にワールド保存を待つ猝予秒数')
+param terminationGracePeriodSeconds int = 90
+
+@description('Startupプローブの失敗許容回数。初回ワールド生成に時間がかかる場合は大きくする')
+param startupProbeFailureThreshold int = 60
 
 @description('RCON接続用パスワード。GitHub Actions等のCI/CDシークレットから注入し、リポジトリへ平文で保存しないこと')
 @secure()
@@ -125,8 +135,8 @@ module containerAppEnvironment 'modules/container-app-environment.bicep' = {
     location: location
     infraSubnetId: network.outputs.infraSubnetId
     logAnalyticsWorkspaceName: logAnalytics.outputs.workspaceName
-    storageAccountName: storage.outputs.storageAccountName
-    fileShareName: storage.outputs.fileShareName
+    nfsServer: storage.outputs.nfsServer
+    nfsShareName: storage.outputs.nfsShareName
     tags: tags
   }
 }
@@ -151,6 +161,9 @@ module minecraftContainerApp 'modules/minecraft-container-app.bicep' = {
     minReplicas: minReplicas
     maxReplicas: maxReplicas
     tcpConcurrentConnections: tcpConcurrentConnections
+    scaleCooldownSeconds: scaleCooldownSeconds
+    terminationGracePeriodSeconds: terminationGracePeriodSeconds
+    startupProbeFailureThreshold: startupProbeFailureThreshold
     rconPassword: rconPassword
     tags: tags
   }
