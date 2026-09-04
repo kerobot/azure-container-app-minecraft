@@ -85,7 +85,12 @@ try {
     Write-Host "リソースグループの存在確認: $ResourceGroupName" -ForegroundColor Cyan
     $rgExists = az group exists --name $ResourceGroupName | ConvertFrom-Json
     if (-not $rgExists) {
-        if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'リソースグループを作成')) {
+        # リソースグループ作成はWhat-Ifプレビューの前提条件のため、-WhatIf時も実際に作成する
+        if ($WhatIfPreference) {
+            Write-Host "リソースグループ '$ResourceGroupName' が存在しないため作成します(What-Ifプレビューの前提として実行されます)。" -ForegroundColor Yellow
+            az group create --name $ResourceGroupName --location $Location | Out-Null
+        }
+        elseif ($PSCmdlet.ShouldProcess($ResourceGroupName, 'リソースグループを作成')) {
             az group create --name $ResourceGroupName --location $Location | Out-Null
         }
     }
