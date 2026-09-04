@@ -34,11 +34,30 @@ jobs:
         run: |
           if [ "${{ inputs.environment }}" = "prod" ]; then
             echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_PROD }}" >> "$GITHUB_OUTPUT"
-            echo "app_name=mcaca-prod-minecraft" >> "$GITHUB_OUTPUT"
+            echo "app_name=${{ vars.PROD_CONTAINER_APP_NAME }}" >> "$GITHUB_OUTPUT"
           else
             echo "resource_group=${{ vars.AZURE_RESOURCE_GROUP_DEV }}" >> "$GITHUB_OUTPUT"
-            echo "app_name=mcaca-dev-minecraft" >> "$GITHUB_OUTPUT"
+            echo "app_name=${{ vars.DEV_CONTAINER_APP_NAME }}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Validate required settings
+        env:
+          RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}
+          APP_NAME: ${{ steps.vars.outputs.app_name }}
+        run: |
+          set -euo pipefail
+          missing=0
+          check_required() {
+            local name="$1"
+            local value="$2"
+            if [ -z "$value" ]; then
+              echo "Missing required setting: ${name}" >&2
+              missing=1
+            fi
+          }
+          check_required "resource_group" "$RESOURCE_GROUP"
+          check_required "app_name" "$APP_NAME"
+          exit "$missing"
 
       - name: Check whether a replica is running
         id: check
@@ -46,7 +65,7 @@ jobs:
           RUNNING=$(az containerapp replica list \
             --name "${{ steps.vars.outputs.app_name }}" \
             --resource-group "${{ steps.vars.outputs.resource_group }}" \
-            --query "length([?properties.runningState=='Running'])" -o tsv || echo 0)
+            --query "length([?properties.runningState=='Running'])" -o tsv)
           echo "running=${RUNNING:-0}" >> "$GITHUB_OUTPUT"
 
       - name: Save world (save-all flush) before stopping

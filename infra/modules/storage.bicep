@@ -3,7 +3,7 @@
 // リソースの再デプロイ (increment mode) ではストレージアカウント・ファイル共有は削除されず、
 // 既存データはそのまま維持されます。誤操作による削除を防ぐため、CanNotDeleteロックを付与します。
 
-@description('リソースの共通名プレフィックス (英数字のみ、storage account名の生成に利用)')
+@description('リソースの共通名プレフィックス (英数字とハイフンのみ、storage account名の生成に利用)')
 param namePrefix string
 
 @description('リソースを配置するAzureリージョン')
@@ -26,11 +26,12 @@ param enableDeleteLock bool = true
 @description('共通タグ')
 param tags object = {}
 
-var storageAccountName = toLower(replace('${namePrefix}stg', '-', ''))
-var sanitizedStorageAccountName = length(storageAccountName) > 24 ? substring(storageAccountName, 0, 24) : storageAccountName
+var normalizedNamePrefix = toLower(replace(namePrefix, '-', ''))
+var storageNamePrefix = length(normalizedNamePrefix) > 9 ? substring(normalizedNamePrefix, 0, 9) : normalizedNamePrefix
+var storageAccountName = '${storageNamePrefix}${uniqueString(resourceGroup().id, namePrefix)}st'
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
-  name: sanitizedStorageAccountName
+resource storageAccount 'Microsoft.Storage/storageAccounts@2026-04-01' = {
+  name: storageAccountName
   location: location
   tags: tags
   sku: {
@@ -57,12 +58,12 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   }
 }
 
-resource fileServices 'Microsoft.Storage/storageAccounts/fileServices@2023-01-01' = {
+resource fileServices 'Microsoft.Storage/storageAccounts/fileServices@2026-04-01' = {
   parent: storageAccount
   name: 'default'
 }
 
-resource minecraftShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
+resource minecraftShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2026-04-01' = {
   parent: fileServices
   name: fileShareName
   properties: {
@@ -73,7 +74,7 @@ resource minecraftShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2
 
 resource deleteLock 'Microsoft.Authorization/locks@2020-05-01' = if (enableDeleteLock) {
   scope: storageAccount
-  name: '${sanitizedStorageAccountName}-delete-lock'
+  name: '${storageAccountName}-delete-lock'
   properties: {
     level: 'CanNotDelete'
     notes: 'Minecraftワールドデータ保護のための削除防止ロック。解除するには明示的にロックを削除すること。'

@@ -39,7 +39,8 @@
 
 `update-minecraft.yml` workflowは、Minecraftバージョンを更新する前に自動的に
 `pre-update-<タイムスタンプ>` ラベルでバックアップを取得してから、Bicepデプロイで
-`minecraftVersion` パラメーターを更新します。手動で行う場合は以下の通りです。
+`minecraftVersion` パラメーターを更新します。バックアップに失敗した場合、バージョン更新は
+中止されます。手動で行う場合は以下の通りです。
 
 ```powershell
 ./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-1.20.5"
@@ -53,16 +54,16 @@
    ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
    ```
 
-2. 復元処理にはレプリカが起動している必要があるため、一時的にサーバーを起動します。
+2. 復元処理には `az containerapp exec` が必要なため、一時的にレプリカを起動します。
+   この時点でMinecraftプロセスも起動するため、復元作業中はプレイヤーが接続しないように
+   ホワイトリスト/運用連絡で必ず制御してください。
 
    ```powershell
    ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
    ```
 
-   > 補足: Minecraftプロセス自体が完全に起動していなくても、コンテナーOS上のシェルコマンドは
-   > 実行可能なため、`az containerapp exec` によるファイル操作は行えます。ただし、Minecraft
-   > プロセスがワールドファイルをロックしている可能性があるため、復元作業中はプレイヤーの
-   > 接続を避けてください。
+   > より厳密な復元が必要な場合は、Minecraftプロセスを起動しない専用ジョブまたは一時コンテナーで
+   > 同じAzure Filesをマウントして復元する運用を検討してください。
 
 3. バックアップファイル名を指定して復元します。
 
@@ -76,7 +77,8 @@
    ./scripts/restore-world.ps1 `
      -ResourceGroupName rg-minecraft-dev `
      -AppName mcaca-dev-minecraft `
-     -BackupFileName "manual-20240101T120000Z.tar.gz"
+       -BackupFileName "manual-20240101T120000Z.tar.gz" `
+       -Force    # 起動中レプリカ上での復元リスクを明示的に承認
    ```
 
 4. スクリプトは復元後、`/data/world/level.dat` の存在を確認して整合性チェックを行います。

@@ -60,12 +60,15 @@ docs/                            # 日本語ドキュメント
 ## クイックスタート
 
 1. [docs/deployment.md](docs/deployment.md) に従い、OIDC用のAzure ADアプリケーション登録と
-   GitHub Secrets/Variablesを設定する
+  GitHub Secrets/Variablesを設定する
 2. `infra/environments/dev.bicepparam` を必要に応じて編集する
    (ホワイトリスト、CPU/メモリ、Minecraftバージョン等)
 3. `deploy-dev.yml` workflow (または `scripts/deploy.ps1`) でデプロイする
 4. `start-server.yml` workflow (または `scripts/start-server.ps1`) でサーバーを起動する
 5. ホワイトリストに登録したプレイヤーでMinecraftクライアントから接続する
+
+`namePrefix` を既定値から変更する場合は、GitHub VariablesのContainer App名も
+`<namePrefix>-minecraft` に合わせて更新してください。
 
 詳細は各ドキュメントを参照してください。
 

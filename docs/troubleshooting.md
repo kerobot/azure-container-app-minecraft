@@ -61,8 +61,10 @@ Minecraftクライアントから接続すれば確実に成功します。
 
 ### デプロイが失敗する (Storage Account名の重複)
 
-Storage Account名はグローバルに一意である必要があります。`namePrefix` パラメーターを
-変更してユニークな名前になるよう調整してください。
+Storage Account名はグローバルに一意である必要があります。本実装では `namePrefix` と
+リソースグループIDから生成したsuffixを含めて衝突しにくくしています。それでも重複した場合は、
+`namePrefix` またはリソースグループを変更してください。`namePrefix` を変更した場合は、
+GitHub Variables の `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` も合わせて更新します。
 
 ### Azure Filesへの接続エラー
 

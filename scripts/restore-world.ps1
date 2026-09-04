@@ -18,13 +18,14 @@
     復元するバックアップファイル名 (例: 'manual-20240101T120000Z.tar.gz')。
 
 .PARAMETER Force
-    実行中のレプリカがある場合でも復元を続行します(非推奨。データ不整合のリスクがあります)。
+    起動中のレプリカ上で復元を続行することを明示的に承認します。
+    復元中はプレイヤー接続を禁止してください(非推奨。データ不整合のリスクがあります)。
 
 .PARAMETER DryRun
     実際のコマンドを実行せず、内容のみ表示します。
 
 .EXAMPLE
-    ./scripts/restore-world.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -BackupFileName manual-20240101T120000Z.tar.gz
+    ./scripts/restore-world.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -BackupFileName manual-20240101T120000Z.tar.gz -Force
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -57,18 +58,18 @@ try {
 
     $runningReplica = $replicas | Where-Object { $_.properties.runningState -eq 'Running' } | Select-Object -First 1
 
-    if ($runningReplica -and -not $Force) {
-        throw "サーバーが実行中です。データ不整合を避けるため、先に stop-server.ps1 でサーバーを停止してから実行してください。強制的に続行する場合は -Force を指定してください(非推奨)。"
+    if ($runningReplica -and -not $Force -and -not $DryRun) {
+        throw "復元には起動中レプリカへのexecが必要です。プレイヤー接続を禁止し、復元リスクを承認したうえで -Force を指定してください。"
     }
 
     if ($runningReplica -and $Force) {
-        Write-Warning 'サーバー実行中に -Force で復元を続行します。ワールドデータが破損する可能性があります。'
+        Write-Warning '起動中レプリカ上で -Force により復元を続行します。復元中はプレイヤー接続を禁止してください。'
     }
 
     # レプリカが存在しない(minReplicas=0)場合、az containerapp exec は利用できないため、
     # 一時的にレプリカを1つ起動してから復元処理を行い、完了後に再度停止する運用を前提とする。
     if (-not $runningReplica) {
-        throw '復元にはレプリカが起動している必要があります。先に start-server.ps1 を実行し、Minecraftプロセス自体は起動前提として復元コマンドを実行できる状態にしてから再実行してください(復元完了後は速やかにサーバーを再起動してください)。'
+        throw '復元には起動中レプリカへのexecが必要です。先に start-server.ps1 を実行し、プレイヤー接続を禁止したうえで -Force を指定して再実行してください。'
     }
 
     $backupPath = "/data/backups/$BackupFileName"

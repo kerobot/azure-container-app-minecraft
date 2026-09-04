@@ -28,15 +28,15 @@ param tags object = {}
 
 // ログ共有キー・ストレージアクセスキーはBicep出力へ含めず、
 // このモジュール内でのみ既存リソース参照から取得して利用する。
-resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' existing = {
   name: logAnalyticsWorkspaceName
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' existing = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2026-04-01' existing = {
   name: storageAccountName
 }
 
-resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+resource managedEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = {
   name: '${namePrefix}-cae'
   location: location
   tags: tags
@@ -56,7 +56,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource azureFilesStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
+resource azureFilesStorage 'Microsoft.App/managedEnvironments/storages@2026-01-01' = {
   parent: managedEnvironment
   name: storageDefinitionName
   properties: {

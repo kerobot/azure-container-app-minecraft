@@ -66,10 +66,19 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 | `AZURE_LOCATION` | デプロイ先リージョン (例: japaneast) |
 | `AZURE_RESOURCE_GROUP_DEV` | dev環境のリソースグループ名 |
 | `AZURE_RESOURCE_GROUP_PROD` | prod環境のリソースグループ名 |
+| `DEV_CONTAINER_APP_NAME` | dev環境のContainer App名 (既定例: `mcaca-dev-minecraft`) |
+| `PROD_CONTAINER_APP_NAME` | prod環境のContainer App名 (既定例: `mcaca-prod-minecraft`) |
 | `DEV_MINECRAFT_WHITELIST_USERS` | devのホワイトリストユーザー (カンマ区切り) |
 | `DEV_MINECRAFT_OP_USERS` | devのop権限ユーザー |
 | `PROD_MINECRAFT_WHITELIST_USERS` | prodのホワイトリストユーザー |
 | `PROD_MINECRAFT_OP_USERS` | prodのop権限ユーザー |
+
+`namePrefix` を変更する場合は、生成されるContainer App名 (`<namePrefix>-minecraft`) に合わせて
+`DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` も更新してください。
+
+Storage Account名には `namePrefix` とリソースグループIDから生成した短いsuffixを含めます。
+既存環境で命名ロジックを変更すると新しいStorage Accountが作成される可能性があるため、
+適用前に既存Azure Filesの移行要否を確認してください。
 
 ### GitHub Environments
 

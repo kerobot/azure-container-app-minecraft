@@ -64,9 +64,8 @@ try {
 
     $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     $backupName = "$Label-$timestamp"
-    $tarCommand = "sh -c 'mkdir -p /data/backups && tar -czf /data/backups/$backupName.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties 2>/dev/null; echo done'"
+    $tarCommand = "sh -c 'mkdir -p /data/backups && tar -czf /data/backups/$backupName.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties'"
     $saveCommand = 'rcon-cli save-all flush'
-    $listCommand = "sh -c 'ls -1t /data/backups/*.tar.gz 2>/dev/null'"
 
     if ($DryRun -or -not $PSCmdlet.ShouldProcess($AppName, "バックアップ作成 ($backupName)")) {
         Write-Host '(DryRun) 以下のコマンドを実行予定です:' -ForegroundColor Yellow

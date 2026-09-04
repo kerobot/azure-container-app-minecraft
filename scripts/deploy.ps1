@@ -107,14 +107,6 @@ try {
     if ($whitelist) { $overrideParams += "whitelistUsers=$whitelist" }
     if ($ops) { $overrideParams += "opUsers=$ops" }
 
-    $deployArgs = @(
-        'deployment', 'group', 'create',
-        '--resource-group', $ResourceGroupName,
-        '--template-file', $templateFile,
-        '--parameters', $paramFile,
-        '--parameters', @($overrideParams)
-    )
-
     if ($WhatIfPreference -or -not $PSCmdlet.ShouldProcess($ResourceGroupName, 'Bicepデプロイを実行')) {
         Write-Host 'What-If モードで実行します。実際のリソース変更は行われません。' -ForegroundColor Yellow
         az deployment group what-if `

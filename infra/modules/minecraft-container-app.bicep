@@ -126,7 +126,7 @@ var minecraftEnv = concat(
 @secure()
 param rconPassword string
 
-resource minecraftApp 'Microsoft.App/containerApps@2024-03-01' = {
+resource minecraftApp 'Microsoft.App/containerApps@2026-01-01' = {
   name: '${namePrefix}-minecraft'
   location: location
   tags: tags

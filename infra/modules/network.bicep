@@ -18,7 +18,7 @@ param infraSubnetAddressPrefix string = '10.100.0.0/23'
 @description('共通タグ')
 param tags object = {}
 
-resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+resource vnet 'Microsoft.Network/virtualNetworks@2025-07-01' = {
   name: '${namePrefix}-vnet'
   location: location
   tags: tags

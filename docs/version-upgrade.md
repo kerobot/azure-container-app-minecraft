@@ -18,6 +18,8 @@
    3. Bicepデプロイで `minecraftVersion` パラメーターを上書き
    4. リビジョンの再起動
 
+バックアップまたは必須設定の検証に失敗した場合、workflowはバージョン更新を中止します。
+
 `prod` 環境の場合、GitHub Environmentの承認ルールに従い、実行前に承認者の承認が必要です。
 
 ## 手順 (手動)
@@ -39,6 +41,9 @@ az deployment group create \
 # 4. サーバー起動して動作確認
 ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft
 ```
+
+上記の `mcaca-prod-minecraft` は既定の `namePrefix` を使った場合の例です。
+`namePrefix` を変更している場合は、実際のContainer App名に置き換えてください。
 
 ## ロールバック手順
 

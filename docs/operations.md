@@ -16,6 +16,9 @@ MinecraftクライアントからサーバーIPへ接続すると、TCPスケー
 2. `Run workflow` から対象環境 (`dev`/`prod`) を選択して実行
 3. レプリカの起動、TCP 25565への接続確認まで自動的に待機します
 
+workflowは `DEV_CONTAINER_APP_NAME` / `PROD_CONTAINER_APP_NAME` のGitHub Variablesを参照します。
+`namePrefix` を変更した場合は、生成されるContainer App名 (`<namePrefix>-minecraft`) に合わせてください。
+
 ### 方法3: PowerShellスクリプトによる明示的な起動
 
 ```powershell
@@ -45,7 +48,8 @@ MinecraftクライアントからサーバーIPへ接続すると、TCPスケー
 ./scripts/status-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 ```
 
-レプリカ数、Ingress FQDN、稼働状態などが表示されます。
+レプリカ数、Ingress FQDN、稼働状態などが表示されます。上記の `mcaca-dev-minecraft` は
+既定の `namePrefix` を使った場合の例です。
 
 ## ホワイトリスト/op権限の変更
 
@@ -68,6 +72,8 @@ ContainerAppConsoleLogs_CL
 | order by TimeGenerated desc
 | take 200
 ```
+
+`namePrefix` を変更している場合は、`ContainerAppName_s` を実際のContainer App名に置き換えてください。
 
 ## メンテナンスウィンドウの考え方
 

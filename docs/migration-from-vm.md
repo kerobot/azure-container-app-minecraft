@@ -63,11 +63,13 @@ az storage file upload \
 ./scripts/restore-world.ps1 `
   -ResourceGroupName rg-minecraft-prod `
   -AppName mcaca-prod-minecraft `
-  -BackupFileName migration.tar.gz
+  -BackupFileName migration.tar.gz `
+  -Force
 ```
 
 `restore-world.ps1` は `/data/backups/` 配下のファイルを対象とするため、
 アップロードしたファイルを `/data/backups/migration.tar.gz` に配置してから実行してください。
+復元中はプレイヤーが接続しないように制御してください。
 
 ### 5. 動作確認
 

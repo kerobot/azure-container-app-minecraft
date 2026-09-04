@@ -18,7 +18,7 @@ param sku string = 'PerGB2018'
 @description('共通タグ')
 param tags object = {}
 
-resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' = {
   name: '${namePrefix}-law'
   location: location
   tags: tags
