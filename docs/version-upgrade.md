@@ -32,10 +32,10 @@
 ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft
 
 # 3. Bicepデプロイでバージョンを更新
-az deployment group create \
-  --resource-group rg-minecraft-prod \
-  --template-file infra/main.bicep \
-  --parameters infra/environments/prod.bicepparam \
+az deployment group create `
+  --resource-group rg-minecraft-prod `
+  --template-file infra/main.bicep `
+  --parameters infra/environments/prod.bicepparam `
   --parameters minecraftVersion=1.20.5 rconPassword='<SECRET>'
 
 # 4. サーバー起動して動作確認

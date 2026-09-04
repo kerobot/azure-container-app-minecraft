@@ -23,10 +23,11 @@ Minecraftを起動しません(`minReplicas=0` のまま)。
 
 ### 2. 移行元のワールドデータをアーカイブする
 
-移行元サーバーで以下を実行します。
+移行元サーバーで以下を実行します。移行元サーバーのOS/シェル (Linuxのbash等) に応じた
+コマンドになるため、下記は一例です。サーバーを停止してから実行することを推奨します
+(整合性確保のため)。
 
-```bash
-# サーバーを停止してから実行することを推奨(整合性確保のため)
+```sh
 tar -czf migration.tar.gz world world_nether world_the_end whitelist.json ops.json server.properties
 ```
 
@@ -44,12 +45,12 @@ Azure Filesへのデータアップロードは以下のいずれかの方法で
 - **az containerapp exec + curl/scp**: 一時的にBlob Storageの
   SASリンク経由でファイルを取得し、コンテナー内で展開する。
 
-```bash
+```powershell
 # 例: Azure Files共有へ直接アップロード (Storage Accountのネットワーク制限に注意)
-az storage file upload \
-  --account-name <storageAccountName> \
-  --share-name minecraft-data \
-  --source migration.tar.gz \
+az storage file upload `
+  --account-name <storageAccountName> `
+  --share-name minecraft-data `
+  --source migration.tar.gz `
   --path migration.tar.gz
 ```
 

@@ -27,18 +27,25 @@ itzg-minecraft-serverの現行仕様(2024年時点のAPIバージョン)に基�
 
 ## 採用したAzure APIバージョン
 
-新規実装にあたり、2024年時点で一般提供(GA)されている以下のAPIバージョンを採用しました。
+各Bicepモジュールで実際に使用している一般提供(GA)のAPIバージョンは以下の通りです
+(値はモジュール実装が正、下表は実装に追従して更新してください)。
 
 | リソース種別 | APIバージョン |
 |---|---|
-| `Microsoft.App/managedEnvironments` | `2024-03-01` |
-| `Microsoft.App/managedEnvironments/storages` | `2024-03-01` |
-| `Microsoft.App/containerApps` | `2024-03-01` |
-| `Microsoft.Network/virtualNetworks` | `2023-11-01` |
-| `Microsoft.Storage/storageAccounts` | `2023-01-01` |
-| `Microsoft.OperationalInsights/workspaces` | `2023-09-01` |
+| `Microsoft.App/managedEnvironments` | `2026-01-01` |
+| `Microsoft.App/managedEnvironments/storages` | `2026-01-01` |
+| `Microsoft.App/containerApps` | `2026-01-01` |
+| `Microsoft.Network/virtualNetworks` | `2025-07-01` |
+| `Microsoft.Storage/storageAccounts` | `2026-04-01` |
+| `Microsoft.OperationalInsights/workspaces` | `2025-07-01` |
 | `Microsoft.Insights/diagnosticSettings` | `2021-05-01-preview` (GA相当の安定版が存在しないため、広く利用されているpreview版を採用) |
 | `Microsoft.Authorization/locks` | `2020-05-01` |
+
+> Container Apps Environment (VNet統合) は、インフラサブネットが `Microsoft.App/environments`
+> へ委任されていることを必須とします (`network.bicep` の `delegations` を参照)。また
+> `Microsoft.App/containerApps` の診断設定はログカテゴリを提供せず `AllMetrics` のみ
+> 対応のため、コンテナーログは環境スコープ (`Microsoft.App/managedEnvironments`) の
+> 診断設定でのみ収集します (`monitoring.bicep` を参照)。
 
 ## 現行Azure仕様との差分・非推奨/更新が必要な箇所
 

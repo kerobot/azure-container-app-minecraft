@@ -86,7 +86,7 @@
 
 5. 復元完了後、Container Appのリビジョンを再起動してMinecraftプロセスへ反映してください。
 
-   ```bash
+   ```powershell
    az containerapp revision restart --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --revision <revision-name>
    ```
 

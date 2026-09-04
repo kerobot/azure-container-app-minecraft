@@ -63,6 +63,17 @@
 - RCON(既定25575番ポート)はContainer AppsのIngress設定に含めないため、外部からは
   到達不能。運用操作は `az containerapp exec` でコンテナー内部から実行する。
 
+### 自動生成される管理用リソースグループ (`ME_...`)
+
+Container Apps Environmentを外部公開のVNet統合(`vnetConfiguration.internal: false`)で作成すると、
+Azureはロードバランサー (`capp-svc-lb`) とパブリックIP (`capp-svc-lb-ip`) を、デプロイ先とは別の
+`ME_<環境名>_<リソースグループ名>_<リージョン>` という命名のリソースグループへ自動的に作成する。
+これはAKSのノードリソースグループ (`MC_...`) と同様のAzureプラットフォーム側の仕様であり、
+このリポジトリのBicep (`network.bicep` / `container-app-environment.bicep`) が明示的に作成している
+ものではない。ユーザー側でこの`ME_...`リソースグループ内のリソースを直接変更・削除しては
+ならず、Container Apps Environment (`managedEnvironments`) を削除すれば連動して自動的に
+削除される (削除手順は `docs/deployment.md` の「5. 作成したリソースの削除」を参照)。
+
 ## セキュリティ設計
 
 詳細は各要件に対応するモジュール/設定を参照してください。
