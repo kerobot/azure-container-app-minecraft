@@ -1,7 +1,7 @@
 // network.bicep
 // Container Apps 環境をVNet統合するための仮想ネットワークとサブネットを作成します。
-// Consumption専用環境では、Container Apps用サブネットにサブネット委任は不要ですが、
-// Container Apps Environmentへインフラサブネットとして割り当てるために十分なアドレス空間を確保します。
+// Container Apps Environment用サブネットは 'Microsoft.App/environments' への
+// サブネット委任が必須です。
 
 @description('リソースの共通名プレフィックス')
 param namePrefix string
@@ -33,9 +33,16 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-07-01' = {
         name: 'infra-subnet'
         properties: {
           addressPrefix: infraSubnetAddressPrefix
-          // Container Apps Environment (Workload Profiles/Consumption) が
-          // このサブネットを専有できるように、他ワークロードとの共有は行わない。
-          delegations: []
+          // Container Apps Environment (VNet統合) はサブネットが
+          // 'Microsoft.App/environments' に委任されていることを必須とする。
+          delegations: [
+            {
+              name: 'Microsoft.App.environments'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
           // Storage Accountへのアクセスをこのサブネットからのみ許可するため、
           // サービスエンドポイントを有効化する。
           serviceEndpoints: [

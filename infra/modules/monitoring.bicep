@@ -43,12 +43,8 @@ resource containerAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-
   scope: containerAppRef
   properties: {
     workspaceId: logAnalyticsWorkspaceId
-    logs: [
-      {
-        categoryGroup: 'allLogs'
-        enabled: true
-      }
-    ]
+    // Microsoft.App/containerApps はログカテゴリを提供しないため(AllMetricsのみ対応)、
+    // コンテナーログは環境スコープの診断設定(environmentDiagnostics)で収集する。
     metrics: [
       {
         category: 'AllMetrics'
