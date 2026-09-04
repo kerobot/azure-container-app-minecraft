@@ -17,9 +17,9 @@ param fileShareQuotaGiB = 64
 param enableStorageDeleteLock = true
 
 param containerImage = 'itzg/minecraft-server:latest'
-// 本番環境ではバージョンを明示的に固定すること (例: '1.20.4')。
+// 本番環境ではバージョンを明示的に固定すること (例: '26.2')。
 // TODO: 実運用開始時に稼働確認済みの具体的なバージョンへ固定すること。
-param minecraftVersion = readEnvironmentVariable('MINECRAFT_VERSION', '1.20.4')
+param minecraftVersion = readEnvironmentVariable('MINECRAFT_VERSION', '26.2')
 
 // ホワイトリストユーザーはCI/CD変数(GitHub Environment Secrets/Variables)から注入する。
 param whitelistUsers = readEnvironmentVariable('MINECRAFT_WHITELIST_USERS', '')

@@ -4,7 +4,7 @@
 
 - 開発環境 (`dev`) は `minecraftVersion=LATEST` を既定とし、最新版へ追従します。
 - 本番環境 (`prod`) は意図しない自動更新を避けるため、必ず具体的なバージョン
-  (例: `1.20.4`) を `infra/environments/prod.bicepparam` に固定してください。
+  (例: `26.2`) を `infra/environments/prod.bicepparam` に固定してください。
 - Minecraftのバージョンアップはワールドデータの互換性に影響するため、
   **必ず事前バックアップを取得**してから実施します。
 
@@ -26,7 +26,7 @@
 
 ```powershell
 # 1. バックアップ
-./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-1.20.5"
+./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-26.2"
 
 # 2. サーバー停止 (推奨: バージョン更新中の接続を避ける)
 ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft
@@ -36,7 +36,7 @@ az deployment group create `
   --resource-group rg-minecraft-prod `
   --template-file infra/main.bicep `
   --parameters infra/environments/prod.bicepparam `
-  --parameters minecraftVersion=1.20.5 rconPassword='<SECRET>'
+  --parameters minecraftVersion=26.2 rconPassword='<SECRET>'
 
 # 4. サーバー起動して動作確認
 ./scripts/start-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft

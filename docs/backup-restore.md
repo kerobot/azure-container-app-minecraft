@@ -43,7 +43,7 @@
 中止されます。手動で行う場合は以下の通りです。
 
 ```powershell
-./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-1.20.5"
+./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-26.2"
 ```
 
 ## 復元手順

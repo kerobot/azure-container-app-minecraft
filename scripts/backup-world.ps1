@@ -15,7 +15,7 @@
     Container App名。
 
 .PARAMETER Label
-    バックアップ名に付与するラベル (例: 'manual', 'pre-update-1.20.4')。既定値は 'manual'。
+    バックアップ名に付与するラベル (例: 'manual', 'pre-update-26.2')。既定値は 'manual'。
 
 .PARAMETER RetentionCount
     保持する世代数。これを超える古いバックアップは削除されます。0以下を指定すると世代整理を行いません。

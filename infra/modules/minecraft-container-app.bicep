@@ -18,7 +18,7 @@ param storageDefinitionName string
 @description('itzg/minecraft-serverのコンテナーイメージ')
 param containerImage string = 'itzg/minecraft-server:latest'
 
-@description('Minecraftのバージョン (例: 1.20.4, LATEST)。本番では固定バージョンを指定すること')
+@description('Minecraftのバージョン (例: 26.2, LATEST)。本番では固定バージョンを指定すること')
 param minecraftVersion string = 'LATEST'
 
 @description('ホワイトリストに登録するMinecraftユーザー名またはUUIDのカンマ区切りリスト')

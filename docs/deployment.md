@@ -55,8 +55,17 @@ az account set --subscription "<SUBSCRIPTION_ID_OR_NAME>"
 
 ### 1-2. パラメーターの確認 (任意)
 
-`infra/environments/dev.bicepparam` を開き、必要に応じて `minecraftVersion` やCPU/メモリ等を
-編集してください。初回はデフォルト値のままで問題ありません。
+`infra/environments/dev.bicepparam` (prod環境の場合は `prod.bicepparam`) を開き、必要に応じて
+`minecraftVersion` やCPU/メモリ等を編集してください。初回はデフォルト値のままで問題ありません。
+
+> **prod環境の場合**: `prod.bicepparam` の `minecraftVersion` は意図しない自動更新を避けるため
+> `readEnvironmentVariable('MINECRAFT_VERSION', '26.2')` で固定バージョンを参照します。
+> 既定の `26.2` で良ければ何もする必要はありませんが、`deploy.ps1` にはバージョン指定用の
+> 引数がないため、別バージョンに固定したい場合はデプロイ実行前に環境変数を設定してください。
+>
+> ```powershell
+> $env:MINECRAFT_VERSION = '26.2'
+> ```
 
 ### 1-3. RCONパスワードの準備
 
@@ -88,6 +97,16 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 - `-WhitelistUsers` : サーバーへの接続を許可するプレイヤー名 (カンマ区切り)
 - `-OpUsers` : op(管理者)権限を与えるプレイヤー名 (カンマ区切り)
 
+> **prod環境の場合**: `-Environment prod` とprod用のリソースグループ名を指定します。
+>
+> ```powershell
+> ./scripts/deploy.ps1 -Environment prod -ResourceGroupName rg-minecraft-prod -RconPassword $rcon -WhitelistUsers "player1,player2" -OpUsers "player1"
+> ```
+>
+> `dev.bicepparam` は `whitelistUsers` の既定値に `dev-user1,dev-user2` を持ちますが、
+> `prod.bicepparam` の既定値は空文字列です。prodデプロイ時に `-WhitelistUsers` を付け忘れると
+> `enableWhitelist = true` のままホワイトリストが空になり、**誰も接続できなくなる**ため注意してください。
+
 ### 1-6. サーバーの起動と接続確認
 
 デプロイ直後は `minReplicas=0` のためサーバーは起動していません。以下で明示的に起動します。
@@ -109,9 +128,28 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
 ```
 
+> **prod環境の場合**: `-ResourceGroupName` にprod用のリソースグループ名、`-AppName` に
+> `mcaca-prod-minecraft` (`namePrefix` が既定のままの場合) を指定してください。
+> `status-server.ps1` / `stop-server.ps1` も同様です。
+
 ここまでで構築・起動・停止の一連の流れは完了です。継続的な運用方法は
 `docs/operations.md` を参照してください。チーム運用やCI/CD化が必要になったら、
 次の2章 (GitHub Actions経由) の設定を検討してください。
+
+### 1-7. prod環境をデプロイする場合の追加の注意点
+
+PowerShellから直接prodをデプロイする場合、devとの違いは基本的にここまでの
+`-Environment prod` とリソース名の指定だけですが、以下の2点は仕組み上devとは異なる
+挙動になるため把握しておいてください。
+
+- **GitHub Environmentの承認フローは適用されません**: 2章で設定する `prod` GitHub
+  Environmentの必須レビュアー承認は、GitHub Actions経由のデプロイにのみ効果があります。
+  PowerShellから直接実行する場合はこの承認プロセスを通らずに即座にデプロイされるため、
+  本番デプロイに承認を必須にしたい運用では2章のGitHub Actions経由の手順を使ってください。
+
+- **Storage Accountに削除ロックが自動付与されます**: `prod.bicepparam` は
+  `enableStorageDeleteLock = true` のため、後で環境を削除する際は
+  「5-1. 削除防止ロックの解除」の手順が追加で必要になります。
 
 ## 2. 選択手順: GitHub Actions経由 (CI/CDで自動化したい場合)
 

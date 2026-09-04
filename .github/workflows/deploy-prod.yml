@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       minecraftVersion:
-        description: '固定するMinecraftバージョン (例: 1.20.4)。空欄の場合はprod.bicepparamの既定値を使用'
+        description: '固定するMinecraftバージョン (例: 26.2)。空欄の場合はprod.bicepparamの既定値を使用'
         required: false
         default: ''
 
