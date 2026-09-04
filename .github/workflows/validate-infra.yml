@@ -59,6 +59,7 @@ jobs:
       - name: Validate required settings
         env:
           AZURE_RESOURCE_GROUP_DEV_VALUE: ${{ vars.AZURE_RESOURCE_GROUP_DEV }}
+          AZURE_LOCATION_VALUE: ${{ vars.AZURE_LOCATION }}
           DEV_MINECRAFT_RCON_PASSWORD_VALUE: ${{ secrets.DEV_MINECRAFT_RCON_PASSWORD }}
           DEV_MINECRAFT_WHITELIST_USERS_VALUE: ${{ vars.DEV_MINECRAFT_WHITELIST_USERS }}
         run: |
@@ -73,9 +74,15 @@ jobs:
             fi
           }
           check_required "AZURE_RESOURCE_GROUP_DEV" "$AZURE_RESOURCE_GROUP_DEV_VALUE"
+          check_required "AZURE_LOCATION" "$AZURE_LOCATION_VALUE"
           check_required "DEV_MINECRAFT_RCON_PASSWORD" "$DEV_MINECRAFT_RCON_PASSWORD_VALUE"
           check_required "DEV_MINECRAFT_WHITELIST_USERS" "$DEV_MINECRAFT_WHITELIST_USERS_VALUE"
           exit "$missing"
+
+      - name: Ensure resource group exists
+        run: |
+          az group show --name "${{ vars.AZURE_RESOURCE_GROUP_DEV }}" \
+            || az group create --name "${{ vars.AZURE_RESOURCE_GROUP_DEV }}" --location "${{ vars.AZURE_LOCATION }}"
 
       - name: What-If deployment (dev parameters)
         uses: azure/arm-deploy@v2

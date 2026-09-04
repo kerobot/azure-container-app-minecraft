@@ -110,6 +110,7 @@ jobs:
           scope: resourcegroup
           resourceGroupName: ${{ steps.vars.outputs.resource_group }}
           template: infra/main.bicep
+          # opUsersはmain.bicepで既定値''を持つ任意パラメーターのため、必須チェックの対象にしていない。
           parameters: >-
             ${{ steps.vars.outputs.param_file }}
             minecraftVersion=${{ inputs.minecraftVersion }}

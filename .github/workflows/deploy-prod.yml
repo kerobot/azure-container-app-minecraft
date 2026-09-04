@@ -55,6 +55,8 @@ jobs:
           check_required "AZURE_LOCATION" "$AZURE_LOCATION_VALUE"
           check_required "PROD_MINECRAFT_RCON_PASSWORD" "$PROD_MINECRAFT_RCON_PASSWORD_VALUE"
           check_required "PROD_MINECRAFT_WHITELIST_USERS" "$PROD_MINECRAFT_WHITELIST_USERS_VALUE"
+          # PROD_CONTAINER_APP_NAMEはこのデプロイでは未使用だが、start/stop/update workflowで
+          # 必要になるため、環境設定の不備をデプロイ時点で早期検知する目的で検証する。
           check_required "PROD_CONTAINER_APP_NAME" "$PROD_CONTAINER_APP_NAME_VALUE"
           exit "$missing"
 
@@ -69,6 +71,8 @@ jobs:
           scope: resourcegroup
           resourceGroupName: ${{ vars.AZURE_RESOURCE_GROUP_PROD }}
           template: infra/main.bicep
+          # opUsers (PROD_MINECRAFT_OP_USERS) はmain.bicepで既定値''を持つ任意パラメーターのため、
+          # whitelistUsersと異なり必須チェックの対象にしていない。
           parameters: >-
             infra/environments/prod.bicepparam
             rconPassword=${{ secrets.PROD_MINECRAFT_RCON_PASSWORD }}
