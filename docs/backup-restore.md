@@ -49,10 +49,11 @@
 
 ## 復元手順
 
-1. 復元前に必ずサーバーを停止してください (データ不整合防止)。
+1. 復元前に必ずサーバーを停止してください (データ不整合防止)。TCPスケールルールが固着して
+   自動スケールインしないことがあるため、`-Force` を付けて確実にレプリカ0にします。
 
    ```powershell
-   ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+   ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
    ```
 
 2. 復元処理には `az containerapp exec` が必要なため、一時的にレプリカを起動します。
@@ -72,24 +73,44 @@
    ./scripts/restore-world.ps1 `
      -ResourceGroupName rg-minecraft-dev `
      -AppName mcaca-dev-minecraft `
-     -BackupFileName "manual-20240101T120000Z.tar.gz" `
+     -BackupFileName "/data/backups/verify-fix-20260905T141543Z.tar.gz" `
      -DryRun   # まず内容を確認
 
    ./scripts/restore-world.ps1 `
      -ResourceGroupName rg-minecraft-dev `
      -AppName mcaca-dev-minecraft `
-       -BackupFileName "manual-20240101T120000Z.tar.gz" `
+       -BackupFileName "/data/backups/verify-fix-20260905T141543Z.tar.gz" `
        -Force    # 起動中レプリカ上での復元リスクを明示的に承認
    ```
+
+   > `-BackupFileName` にはファイル名のみ (`manual-...tar.gz`) と、バックアップ完了時に
+   > 表示されるフルパス (`/data/backups/manual-...tar.gz`) のどちらを指定しても構いません。
 
 4. スクリプトは復元後、`/data/world/level.dat` の存在を確認して整合性チェックを行います。
    チェックに失敗した場合はエラー終了し、復元が不完全であることを通知します。
 
-5. 復元完了後、Container Appのリビジョンを再起動してMinecraftプロセスへ反映してください。
+5. 復元完了後、Minecraftプロセスを再起動してディスク上の復元済みワールドを読み込ませてください。
+
+   > **`az containerapp revision restart` は使わないでください。** step2で起動したレプリカが
+   > 稼働中のままこのコマンドを実行すると、新しいレプリカがワールドの`session.lock`を取得できず
+   > `already locked` で無限にクラッシュし続け、旧レプリカも生き残り続けるデッドロックに陥ります
+   > (`docs/troubleshooting.md` の「`revision restart` 実行後にレプリカがデッドロックする」を参照)。
+
+   代わりに、RCON経由でMinecraftプロセスのみを再起動します。コンテナーは同じレプリカ内で
+   自動的に再起動し、新しいレプリカの生成やリビジョンの競合を伴いません。
 
    ```powershell
-   az containerapp revision restart --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --revision <revision-name>
+   # 稼働中のレプリカ名を確認
+   az containerapp replica list --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+     --query "[?properties.runningState=='Running'].name" -o tsv
+
+   # RCON経由でMinecraftプロセスを再起動 (同一レプリカ内でコンテナーが自動再起動する)
+   az containerapp exec --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+     --replica <replica-name> --command 'rcon-cli stop'
    ```
+
+   再起動には数十秒〜数分かかります。`./scripts/status-server.ps1` でMinecraftサーバーが
+   応答するようになったことを確認してください。
 
 ## 復元後の整合性確認
 

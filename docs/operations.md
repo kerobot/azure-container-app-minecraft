@@ -41,26 +41,38 @@ Container AppsのTCP Ingressはバックエンドが異常でもTCPハンドシ�
 
 ## サーバーの停止
 
-全員が退出してTCP接続が途絶えると、`scaleCooldownSeconds`
-(dev: 120秒 / prod: 300秒) の経過後に自動的にスケールインされます。
-確実にワールドを保存してから停止したい場合は以下の手順を利用してください。
+TCPスケールルールは接続なしでも `RunningAtMaxScale` のまま固着し、
+`scaleCooldownSeconds` (dev: 120秒 / prod: 300秒) を待っても自動的にスケールインしない
+ことが確認されています (詳細は `docs/troubleshooting.md` の
+「TCPスケールルールが固着してスケールインしない」を参照)。そのため、遊び終えたら
+**基本的に `-Force` を付けて停止してください**。TCPスケールルールに依存せず、
+リビジョンを非アクティブ化してレプリカを確実に0にします。
 
 > Minecraftクライアントのサーバー一覧画面を開いたままだとTCP接続が継続し、
-> スケールインしません。停止したいときはクライアントを閉じてください。
+> `-Force` を付けない通常の待機ではスケールインしません。
 
 ### GitHub Actions
 
-`Stop Minecraft Server` workflowを実行してください。workflowは `scripts/stop-server.ps1` を
-呼び出し、実行中のレプリカがある場合は `rcon-cli save-all flush` でワールドを保存したうえで
-スケールインの完了を待ちます。
+`Stop Minecraft Server` workflowを実行してください。workflowは `scripts/stop-server.ps1
+-Force` を呼び出し、実行中のレプリカがある場合は `rcon-cli save-all flush` でワールドを
+保存したうえでリビジョンを非アクティブ化し、レプリカを確実に0にします。
 
 ### PowerShellスクリプト
 
 ```powershell
-./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
 ```
 
-待機を行わずに保存だけして終了したい場合は `-SkipWait` を指定してください。
+`-Force` でリビジョンを非アクティブ化した場合でも、次回 `start-server.ps1` を実行すれば
+リビジョンを自動的に再アクティブ化してから起動するため、追加の手作業は不要です。
+
+待機を行わずに保存だけして終了したい場合は `-SkipWait` を指定してください
+(この場合はTCPスケールルールによる自動スケールインを待つことになり、
+上記の固着が起きている間は止まらない点に注意してください)。
+
+```powershell
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -SkipWait
+```
 
 ## 状態確認
 

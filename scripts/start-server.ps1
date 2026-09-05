@@ -54,6 +54,21 @@ try {
         throw "Ingress FQDNを取得できませんでした: $AppName"
     }
 
+    # stop-server.ps1 -Force でリビジョンを非アクティブ化した場合、TCP接続だけでは
+    # トラフィックが届かないため、先にリビジョンを再アクティブ化しておく必要がある。
+    if (-not (Test-RevisionActive -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision)) {
+        Write-Host "リビジョンが非アクティブです。再アクティブ化します: $($app.ActiveRevision)" -ForegroundColor Cyan
+        az containerapp revision activate `
+            --name $AppName `
+            --resource-group $ResourceGroupName `
+            --revision $app.ActiveRevision `
+            --only-show-errors --output none
+        if ($LASTEXITCODE -ne 0) {
+            throw "リビジョンの再アクティブ化に失敗しました: $($app.ActiveRevision)"
+        }
+        Start-Sleep -Seconds 5
+    }
+
     $serverStatus = Get-MinecraftServerStatus -Hostname $app.Fqdn -Port 25565
     if ($serverStatus) {
         Write-Host "サーバーは既に起動しています: $($app.Fqdn):25565 ($(Format-MinecraftServerStatus -Status $serverStatus))" -ForegroundColor Green

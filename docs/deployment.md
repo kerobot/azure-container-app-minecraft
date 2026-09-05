@@ -111,7 +111,7 @@ $rcon = Read-Host -AsSecureString "RCON Password"
 > 「単一インスタンス制約と『minReplicasを変更しない』運用」を参照してください。
 >
 > ```powershell
-> ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+> ./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
 > ```
 
 prod環境へデプロイする場合は、以下の点が追加で異なります。
@@ -142,11 +142,13 @@ prod環境へデプロイする場合は、以下の点が追加で異なりま�
 ```
 
 表示されたIngress FQDNとポート25565を使い、Minecraftクライアントから接続を確認してください。
-使い終わったら以下でワールドを保存し、スケールインを待ちます
-(無操作放置でも接続が途絶えて一定時間後に自動でスケールインします)。
+使い終わったら以下でワールドを保存し、確実にレプリカを0にします。TCPスケールルールが
+接続なしでも `RunningAtMaxScale` のまま固着し自動でスケールインしないことがあるため、
+`-Force` を付けて停止してください (詳細は `docs/troubleshooting.md` の
+「TCPスケールルールが固着してスケールインしない」を参照)。
 
 ```powershell
-./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
 ```
 
 > **prod環境の場合**: `-ResourceGroupName` にprod用のリソースグループ名、`-AppName` に

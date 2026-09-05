@@ -129,7 +129,7 @@ net.minecraft.util.DirectoryLock$LockException: /data/./world/session.lock: alre
 
 ```powershell
 # 1. 稼働中リビジョンでワールドを保存し、停止する
-./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
 
 # 2. 起動できなかったリビジョンを非アクティブ化する
 az containerapp revision deactivate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
@@ -141,14 +141,92 @@ az containerapp revision deactivate --name mcaca-dev-minecraft --resource-group 
 
 なお `scripts/lib/containerapp.ps1` を経由する運用スクリプトは、この状態を検出すると警告を表示します。
 
+### `revision restart` 実行後にレプリカがデッドロックする
+
+稼働中のレプリカに対して `az containerapp revision restart` を実行すると、
+**同一リビジョン内で**新旧2つのレプリカが同時に存在する状態になることがあります。
+新レプリカはワールドの `session.lock` を取得できず無限にクラッシュし、旧レプリカは
+(新レプリカがReadyにならないため)生き残り続けるデッドロックに陥ります。
+
+```powershell
+az containerapp replica list --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name> --query "[].{name:name,state:properties.runningState,restarts:properties.containers[0].restartCount}" -o table
+```
+
+同一リビジョンに `Running` と `CrashLoopBackOff` のレプリカが両方表示される場合、この状態です。
+`latestRevisionName` と `latestReadyRevisionName` は一致するため、前項の「新旧リビジョン競合」の
+検出ロジックでは気づけない点に注意してください。`rcon-cli stop` で旧レプリカを止めても
+プラットフォームが同じレプリカを自動再起動するだけで解消しません。リビジョンごと
+非アクティブ化・再アクティブ化することで、すべてのレプリカを完全に停止させてから
+クリーンな状態で起動し直してください。
+
+```powershell
+# 1. リビジョンを非アクティブ化し、すべてのレプリカを完全に停止させる
+az containerapp revision deactivate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name>
+
+# 2. 全レプリカがNotRunning/Terminatedになったことを確認する
+az containerapp replica list --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name> --query "[].properties.runningState" -o tsv
+
+# 3. リビジョンを再アクティブ化し、クリーンな単一レプリカで起動し直す
+az containerapp revision activate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name>
+```
+
+そもそも `revision restart` は、対象レプリカが完全に停止している(レプリカ0)状態でのみ
+実行するようにしてください。稼働中のまま実行しないことが最も確実な予防策です。
+
 ### サーバーが停止しない / スケールインしない
 
-`minReplicas` は0固定で、TCP接続が途絶えてから `scaleCooldownSeconds`
-(dev: 120秒 / prod: 300秒) の経過後にスケールインします。以下を確認してください。
+TCPスケールルールが接続なしでも `RunningAtMaxScale` のまま固着し、`scaleCooldownSeconds`
+(dev: 120秒 / prod: 300秒) を待っても自動的にスケールインしないことが確認されています。
+そのため停止時は待機に頼らず、基本的に `-Force` を付けて実行してください
+(詳細は次項「TCPスケールルールが固着してスケールインしない」を参照)。
+
+```powershell
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
+```
+
+`-Force` を付けずに待機した場合は、以下を確認してください。
 
 - Minecraftクライアントのサーバー一覧画面を開いたままだとTCP接続が張られ続けます。閉じてください
 - `status-server.ps1` の出力でオンラインプレイヤーが0であること
-- 上記を満たしても停止しない場合は、`scripts/stop-server.ps1` の待機時間を延ばして再実行してください
+
+### TCPスケールルールが固着してスケールインしない (`RunningAtMaxScale`)
+
+プレイヤーが0人 (`status-server.ps1` のServer List Pingで確認済み) にもかかわらず、
+`stop-server.ps1` を`scaleCooldownSeconds`を超える時間待ってもレプリカが0にならない事象が、
+複数日にわたって継続して観測されています。次のコマンドでリビジョンの `runningState` を
+確認してください。
+
+```powershell
+az containerapp revision show --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name> --query "properties.runningState" -o tsv
+```
+
+`RunningAtMaxScale` のまま変化しない場合、TCPスケールルール(KEDA)が「接続あり」と
+判定し続けている状態です。コンテナー内部の実際のTCP接続を確認すると、外部クライアントが
+いなくても内部アドレスからの `ESTAB` 接続が残っていることがあります。
+
+```powershell
+az containerapp exec --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --replica <replica-name> --command 'ss -tnp'
+```
+
+原因はプラットフォーム側のコネクション追跡の問題であり、`scaleCooldownSeconds` や
+`tcpConcurrentConnections` の値を調整しても解消しません。自動復旧を待たず、
+`scripts/stop-server.ps1` の `-Force` オプションでリビジョンを非アクティブ化して
+強制的にレプリカを0にしてください。このため運用スクリプト・GitHub Actions workflow・
+ドキュメントの停止手順はすべて `-Force` を標準として使うようにしています。
+
+```powershell
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-dev -AppName mcaca-dev-minecraft -Force
+```
+
+`-Force` はワールド保存後に `az containerapp revision deactivate` を実行し、TCP接続の状態に
+関わらずレプリカを確実に0にします。次回 `scripts/start-server.ps1` を実行すると、非アクティブな
+リビジョンを自動的に再アクティブ化してから起動するため、追加の手作業は不要です。
 
 ### RCON経由のコマンドが失敗する
 

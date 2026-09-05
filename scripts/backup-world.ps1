@@ -62,33 +62,51 @@ try {
 
     $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
     $backupName = "$Label-$timestamp"
-    $tarCommand = "sh -c 'mkdir -p /data/backups && tar -czf /data/backups/$backupName.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties'"
+    # az containerapp exec は Windows上のPowerShellから `&&` やパイプを含む文字列を渡すと
+    # cmd.exe側で誤解釈され、コンテナー側に壊れたコマンドが届くことがある
+    # (docs/incident-records.md のINC-005を参照)。そのため単純なコマンド1つずつをexecで実行する。
+    $mkdirCommand = 'mkdir -p /data/backups'
+    $tarCommand = "tar -czf /data/backups/$backupName.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties"
     $saveCommand = 'rcon-cli save-all flush'
 
     if ($DryRun -or -not $PSCmdlet.ShouldProcess($AppName, "バックアップ作成 ($backupName)")) {
-        Write-Host '(DryRun) 以下のコマンドを実行予定です:' -ForegroundColor Yellow
+        Write-Host '(DryRun) 以下のコマンドを順に実行予定です:' -ForegroundColor Yellow
         Write-Host "  1. $saveCommand"
-        Write-Host "  2. $tarCommand"
+        Write-Host "  2. $mkdirCommand"
+        Write-Host "  3. $tarCommand"
         if ($RetentionCount -gt 0) {
-            Write-Host "  3. 世代整理 (最新 $RetentionCount 件を保持し、それより古いものを削除)"
+            Write-Host "  4. 世代整理 (最新 $RetentionCount 件を保持し、それより古いものを削除)"
         }
         exit 0
     }
 
     Write-Host 'ワールドデータをフラッシュ保存しています...' -ForegroundColor Cyan
-    az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $saveCommand
+    try {
+        Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $saveCommand | Out-Null
+    }
+    catch {
+        Write-Warning "save-all flushに失敗しました。コンテナーの自動セーブに委ねてバックアップを続行します: $($_.Exception.Message)"
+    }
     Start-Sleep -Seconds 10
 
     Write-Host "バックアップを作成しています: $backupName.tar.gz" -ForegroundColor Cyan
-    az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $tarCommand
-    if ($LASTEXITCODE -ne 0) {
-        throw "バックアップの作成に失敗しました (終了コード: $LASTEXITCODE)"
-    }
+    Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $mkdirCommand | Out-Null
+    Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $tarCommand | Out-Null
 
     if ($RetentionCount -gt 0) {
         Write-Host "世代整理を行っています (保持数: $RetentionCount)..." -ForegroundColor Cyan
-        $pruneCommand = "sh -c 'cd /data/backups && ls -1t *.tar.gz 2>/dev/null | tail -n +$($RetentionCount + 1) | xargs -r rm -f'"
-        az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $pruneCommand | Out-Null
+        # 一覧取得と世代数の判定はPowerShell側で行い、削除だけをexec経由の単純なコマンドで実行する。
+        try {
+            $listResult = Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command 'ls -1t /data/backups'
+            $backupFiles = @($listResult -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.tar\.gz$' })
+            $filesToDelete = $backupFiles | Select-Object -Skip $RetentionCount
+            foreach ($file in $filesToDelete) {
+                Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command "rm -f /data/backups/$file" | Out-Null
+            }
+        }
+        catch {
+            Write-Warning "世代整理に失敗したためスキップしました: $($_.Exception.Message)"
+        }
     }
 
     Write-Host "バックアップが完了しました: /data/backups/$backupName.tar.gz" -ForegroundColor Green

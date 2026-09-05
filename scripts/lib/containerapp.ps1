@@ -12,6 +12,39 @@
     運用スクリプトからドット ソースして利用します。
 #>
 
+<#
+.SYNOPSIS
+    Container Appのレプリカ上でコマンドをexec実行し、結果のテキストを返します。
+#>
+function Invoke-ContainerAppExecCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$ReplicaName,
+        [Parameter(Mandatory = $true)][string]$Command
+    )
+
+    $output = az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $ReplicaName --command $Command 2>&1
+    $exitCode = $LASTEXITCODE
+    $outputText = ($output | Out-String)
+
+    if ($exitCode -ne 0) {
+        if ($outputText -match '429|Too Many Requests') {
+            throw "az containerapp exec がレート制限(429 Too Many Requests)で失敗しました。" +
+                "『しばらく待ってから再実行してください』と表示されますが、実際には数分〜1時間以上" +
+                "かかることがあります。短時間にexecを連続実行しすぎないようにしてください。"
+        }
+        throw "az containerapp exec の実行に失敗しました (終了コード: $exitCode)`n$outputText"
+    }
+
+    return $outputText
+}
+
+<#
+<#
+.SYNOPSIS
+    Assert-AzureCli
+#>
 function Assert-AzureCli {
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         throw 'Azure CLI (az) が見つかりません。'
@@ -101,6 +134,29 @@ function Get-CrashedContainer {
         ForEach-Object { $_.properties.containers } |
         Where-Object { $_.runningStateDetails -like '*CrashLoopBackOff*' } |
         Select-Object -First 1
+}
+
+<#
+.SYNOPSIS
+    指定リビジョンがアクティブ(トラフィックを受け付ける状態)かどうかを返します。
+#>
+function Test-RevisionActive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$RevisionName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RevisionName)) { return $false }
+
+    $json = az containerapp revision show `
+        --name $AppName `
+        --resource-group $ResourceGroupName `
+        --revision $RevisionName `
+        --output json --only-show-errors
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) { return $false }
+
+    return [bool]($json | ConvertFrom-Json).properties.active
 }
 
 <#

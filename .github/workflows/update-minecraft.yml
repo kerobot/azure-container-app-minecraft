@@ -86,7 +86,7 @@ jobs:
           Write-Host $status
           if ($status -match 'RunningRepl\s*:\s*[1-9]') {
             ./scripts/backup-world.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Label "pre-update-${{ inputs.minecraftVersion }}"
-            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME
+            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Force
           }
           else {
             Write-Host 'サーバーは停止しています。バックアップ対象がないためスキップします。'

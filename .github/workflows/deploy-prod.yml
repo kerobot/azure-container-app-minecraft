@@ -76,7 +76,7 @@ jobs:
         run: |
           az containerapp show --name $env:APP_NAME --resource-group $env:RESOURCE_GROUP -o none 2>$null
           if ($LASTEXITCODE -eq 0) {
-            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME
+            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Force
           }
           else {
             Write-Host '初回デプロイのため停止処理は不要です。'

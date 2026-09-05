@@ -16,7 +16,8 @@
     Container App名。
 
 .PARAMETER BackupFileName
-    復元するバックアップファイル名 (例: 'manual-20240101T120000Z.tar.gz')。
+    復元するバックアップファイル名またはフルパス
+    (例: 'manual-20240101T120000Z.tar.gz' / '/data/backups/manual-20240101T120000Z.tar.gz')。
 
 .PARAMETER Force
     起動中のレプリカ上で復元を続行することを明示的に承認します。
@@ -71,34 +72,40 @@ try {
         throw '復元には起動中レプリカへのexecが必要です。先に start-server.ps1 を実行し、プレイヤー接続を禁止したうえで -Force を指定して再実行してください。'
     }
 
-    $backupPath = "/data/backups/$BackupFileName"
-    $verifyCommand = "sh -c 'test -f $backupPath && echo FOUND || echo MISSING'"
-    $restoreCommand = "sh -c 'rm -rf /data/world /data/world_nether /data/world_the_end && tar -xzf $backupPath -C /data && echo done'"
-    $verifyIntegrityCommand = "sh -c 'test -d /data/world && test -f /data/world/level.dat && echo OK || echo NG'"
+    $backupFileNameOnly = Split-Path -Leaf $BackupFileName
+    $backupPath = "/data/backups/$backupFileNameOnly"
+    # az containerapp exec は Windows上のPowerShellから `&&` を含む文字列を渡すと
+    # cmd.exe側でコマンド区切りとして誤解釈され、コンテナー側に壊れたコマンドが届く
+    # (docs/incident-records.md のINC-005を参照)。そのため単純なコマンド1つずつをexecで実行する。
+    $listCommand = 'ls -1 /data/backups'
+    $removeCommand = 'rm -rf /data/world /data/world_nether /data/world_the_end'
+    $extractCommand = "tar -xzf $backupPath -C /data"
+    $listWorldCommand = 'ls /data/world'
 
-    if ($DryRun -or -not $PSCmdlet.ShouldProcess($AppName, "復元 ($BackupFileName)")) {
-        Write-Host '(DryRun) 以下のコマンドを実行予定です:' -ForegroundColor Yellow
-        Write-Host "  1. $verifyCommand"
-        Write-Host "  2. $restoreCommand"
-        Write-Host "  3. $verifyIntegrityCommand"
+    if ($DryRun -or -not $PSCmdlet.ShouldProcess($AppName, "復元 ($backupFileNameOnly)")) {
+        Write-Host '(DryRun) 以下のコマンドを順に実行予定です:' -ForegroundColor Yellow
+        Write-Host "  1. $listCommand (存在確認: $backupFileNameOnly)"
+        Write-Host "  2. $removeCommand"
+        Write-Host "  3. $extractCommand"
+        Write-Host "  4. $listWorldCommand (整合性確認: level.dat)"
         exit 0
     }
 
     Write-Host "バックアップファイルの存在を確認しています: $backupPath" -ForegroundColor Cyan
-    $verifyResult = az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $verifyCommand
-    if ($verifyResult -notmatch 'FOUND') {
+    $listResult = Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $listCommand
+    if ($listResult -notmatch [regex]::Escape($backupFileNameOnly)) {
         throw "バックアップファイルが見つかりません: $backupPath"
     }
 
+    Write-Host '既存のワールドデータを削除しています...' -ForegroundColor Cyan
+    Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $removeCommand | Out-Null
+
     Write-Host 'ワールドデータを復元しています...' -ForegroundColor Cyan
-    az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $restoreCommand
-    if ($LASTEXITCODE -ne 0) {
-        throw "復元処理に失敗しました (終了コード: $LASTEXITCODE)"
-    }
+    Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $extractCommand | Out-Null
 
     Write-Host '復元後の整合性を確認しています...' -ForegroundColor Cyan
-    $integrityResult = az containerapp exec --name $AppName --resource-group $ResourceGroupName --replica $runningReplica.name --command $verifyIntegrityCommand
-    if ($integrityResult -notmatch 'OK') {
+    $integrityResult = Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $listWorldCommand
+    if ($integrityResult -notmatch 'level\.dat') {
         throw '復元後の整合性確認に失敗しました。ワールドデータ(level.dat)が見つかりません。'
     }
 

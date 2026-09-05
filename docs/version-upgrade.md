@@ -29,7 +29,7 @@
 ./scripts/backup-world.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Label "pre-update-26.2"
 
 # 2. サーバー停止 (推奨: バージョン更新中の接続を避ける)
-./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft
+./scripts/stop-server.ps1 -ResourceGroupName rg-minecraft-prod -AppName mcaca-prod-minecraft -Force
 
 # 3. Bicepデプロイでバージョンを更新
 az deployment group create `

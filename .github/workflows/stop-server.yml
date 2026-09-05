@@ -69,4 +69,4 @@ jobs:
           RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}
           APP_NAME: ${{ steps.vars.outputs.app_name }}
         run: |
-          ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME
+          ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Force

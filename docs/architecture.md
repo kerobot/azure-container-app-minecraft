@@ -95,8 +95,9 @@ Minecraftはワールドディレクトリを `session.lock` で**排他ロッ�
 - `minReplicas` は**常に0のまま**運用する (`dev` / `prod` いずれの `.bicepparam` も0固定)
 - 起動は `scripts/start-server.ps1` がTCP接続を張ってスケールルールを誘発する
   (テンプレートを変更しないため、新しいリビジョンは生成されない)
-- 停止は `scripts/stop-server.ps1` がワールドを保存し、`cooldownPeriod` 経過後の
-  自動スケールインを待つ
+- 停止は `scripts/stop-server.ps1 -Force` がワールドを保存し、リビジョンを非アクティブ化して
+  レプリカを確実に0にする (TCPスケールルールが `RunningAtMaxScale` のまま固着し、
+  `cooldownPeriod` を待っても自動スケールインしないことがあるため、待機には依存しない)
 - デプロイ (`scripts/deploy.ps1` / `deploy-*.yml`) は**実行前にサーバーが停止していることを確認**する
 
 運用スクリプトは `latestReadyRevisionName` を明示して `az containerapp replica list` を呼び出します

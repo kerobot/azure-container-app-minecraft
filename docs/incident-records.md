@@ -7,6 +7,9 @@
 
 - [INC-001: Azure Files (SMB) 上でMinecraftサーバーが起動しない](#inc-001-azure-files-smb-上でminecraftサーバーが起動しない)
 - [INC-002: リビジョン競合によるデッドロック](#inc-002-リビジョン競合によるデッドロック)
+- [INC-003: `revision restart` による同一リビジョン内デッドロック](#inc-003-revision-restart-による同一リビジョン内デッドロック)
+- [INC-004: TCPスケールルールが固着してスケールインしない](#inc-004-tcpスケールルールが固着してスケールインしない)
+- [INC-005: `az containerapp exec` の `&&` 誤作動とレート制限](#inc-005-az-containerapp-exec-の--誤作動とレート制限)
 - [横断的な学び](#横断的な学び)
 
 ---
@@ -208,6 +211,202 @@ Startup プローブの失敗は **3回のみ** (10秒間隔でMinecraftの起�
 
 ---
 
+## INC-003: `revision restart` による同一リビジョン内デッドロック
+
+**発生日**: 2026-09-05 / **影響**: dev環境。プレイヤーは0人だが復旧作業中にサーバーが
+応答不能になった
+
+### 概要 (INC-003)
+
+「サーバーが半日以上稼働したままスケールインしない」事象を調査する過程で、稼働中の
+レプリカに対して `az containerapp revision restart` を実行したところ、INC-002と同種の
+セッションロック競合が**同一リビジョン内**で発生した。
+
+### 症状 (INC-003)
+
+```text
+mcaca-dev-minecraft--mzl0a47-77ddf7487c-cfkh5  Running          restartCount:0  ← 旧pod (ロック保持)
+mcaca-dev-minecraft--mzl0a47-78ffcdfbf4-2wrtj  CrashLoopBackOff restartCount:4  ← 新pod
+```
+
+クラッシュ中のpodのログ:
+
+```text
+net.minecraft.util.DirectoryLock$LockException: /data/./world/session.lock: already locked (possibly by other Minecraft instance?)
+```
+
+`latestRevisionName` と `latestReadyRevisionName` は一致しており(新リビジョンは生成されて
+いない)、INC-002検出用の `Write-RevisionMismatchWarning` では気づけない状態だった。
+`stop-server.ps1` の待機ループでは、このクラッシュ再試行のタイミングによって
+稼働レプリカ数が1↔2で揺れて表示された。
+
+### 原因 (INC-003)
+
+`revision restart` は「新pod起動→Readyになったら旧podを停止」というローリング方式で動く。
+Minecraftはワールドを排他ロックするため、新podは旧podが生きている限り絶対にReadyになれず、
+旧podも(新podがReadyにならないため)永久に停止しない。**`revision restart` はテンプレートを
+変更しないため新リビジョンは生成されないが、同一リビジョン内でも新旧2つのpodが一時的に
+共存し、同じデッドロックが発生しうる**。
+
+`rcon-cli stop` で旧podのMinecraftプロセスを止めても、プラットフォームが同じレプリカを
+自動的に再起動してロックを再取得してしまい、解消しなかった。
+
+### 解決策 (INC-003)
+
+`az containerapp revision deactivate` → `activate` で、リビジョンごと完全に停止してから
+再起動することで、新旧podの共存状態を解消できた。
+
+```powershell
+# 1. リビジョンを非アクティブ化し、すべてのレプリカを完全に停止させる
+az containerapp revision deactivate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --revision <revision-name>
+
+# 2. 全レプリカがNotRunning/Terminatedになったことを確認する
+az containerapp replica list --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --revision <revision-name>
+
+# 3. リビジョンを再アクティブ化し、クリーンな単一レプリカで起動し直す
+az containerapp revision activate --name mcaca-dev-minecraft --resource-group rg-minecraft-dev --revision <revision-name>
+```
+
+再アクティブ化後は新旧podの競合なく単一の健全なレプリカのみが起動した。
+
+### 対応した恒久対策 (INC-003)
+
+| 対象 | 変更内容 |
+| --- | --- |
+| `docs/backup-restore.md` | 復元後の反映手順を `revision restart` から、RCON経由でMinecraftプロセスのみを再起動する方式へ変更 (同一レプリカ内でコンテナーが自動再起動するため新旧podの競合が起きない) |
+| `docs/troubleshooting.md` | 「`revision restart` 実行後にレプリカがデッドロックする」を追加し、検知方法と `deactivate`→`activate` による復旧手順を明記 |
+
+`revision restart` は、対象レプリカが完全に停止している(レプリカ0)状態でのみ実行することを徹底する。
+
+---
+
+## INC-004: TCPスケールルールが固着してスケールインしない
+
+**発生日**: 2026-09-05 / **影響**: dev環境。プレイヤー0人の状態が半日以上続いても
+レプリカが0にならなかった
+
+### 概要 (INC-004)
+
+INC-003の復旧(`deactivate`→`activate`)後、プレイヤーが0人 (`status-server.ps1` の
+Server List Pingで確認済み) であるにもかかわらず、`stop-server.ps1` を
+`scaleCooldownSeconds` (120秒) を大幅に超える時間 (180秒以上) 待ってもレプリカが
+0にならなかった。
+
+### 症状 (INC-004)
+
+```powershell
+az containerapp revision show --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --revision <revision-name> --query "properties.runningState" -o tsv
+# => RunningAtMaxScale (待っても変化しない)
+```
+
+コンテナー内部の実際のTCP接続を確認すると、外部クライアントが誰もいないにもかかわらず
+25565番ポートに内部アドレスからの `ESTAB` 接続が残っていた。
+
+```powershell
+az containerapp exec --name mcaca-dev-minecraft --resource-group rg-minecraft-dev `
+  --replica <replica-name> --command 'ss -tnp'
+# => ESTAB 0 0  100.100.204.182:25565  100.100.0.35:43240  など
+```
+
+`scale.cooldownPeriod` (120) / `pollingInterval` (30) はBicep通りに正しく設定されており、
+設定不備ではなかった。
+
+### 原因 (INC-004)
+
+TCPスケールルール(KEDA)がプラットフォーム側で「接続あり」と判定し続ける状態に
+固着していた。`scaleCooldownSeconds` や `tcpConcurrentConnections` の値を調整しても
+解消しない、プラットフォーム側のコネクション追跡に起因する問題と判断した
+(直前の `deactivate`/`activate` による強制操作が引き金になった可能性がある)。
+
+### 解決策 (INC-004)
+
+TCPスケールルールに依存せず、`az containerapp revision deactivate` でリビジョンを
+非アクティブ化して強制的にレプリカを0にする方法が確実に機能することを確認した。
+
+### 対応した恒久対策 (INC-004)
+
+| 対象 | 変更内容 |
+| --- | --- |
+| `scripts/lib/containerapp.ps1` | リビジョンがアクティブかどうかを調べる `Test-RevisionActive` を追加 |
+| `scripts/stop-server.ps1` | `-Force` スイッチを追加。ワールド保存後、TCPスケールルールを待たずに `revision deactivate` でレプリカを確実に0にする |
+| `scripts/start-server.ps1` | リビジョンが非アクティブな場合、TCP接続を張る前に自動で `revision activate` するよう修正 (`-Force` で停止した後も手作業なしで再開できる) |
+| `docs/operations.md` / `docs/troubleshooting.md` | 症状の診断コマンドと `-Force` の使い方を追記 |
+
+---
+
+## INC-005: `az containerapp exec` の `&&` 誤作動とレート制限
+
+**発生日**: 2026-09-05 / **影響**: dev環境。`backup-world.ps1` / `restore-world.ps1`
+が失敗し、バックアップ・復元ができなかった
+
+### 概要 (INC-005)
+
+`restore-world.ps1` 実行中に以下のエラーが発生した。
+
+```text
+-rf: 1: Syntax error: Unterminated quoted string
+```
+
+`$LASTEXITCODE` は0になっておりスクリプトはエラーに気づかず先に進んだが、実際には
+`tar` 展開が一度も実行されておらず、最終的に整合性確認(`level.dat`の存在確認)で
+失敗した。
+
+別の日には別の事象として、`az containerapp exec` 自体が以下の例外で失敗することもあった。
+
+```text
+websocket._exceptions.WebSocketBadStatusException: Handshake status 429 Too Many Requests
+```
+
+`retry-after: 600` (10分) と表示されるが、1時間後に再試行しても同じ429が発生した。
+この際、`restore-world.ps1` は実際の原因(レート制限)ではなく「バックアップファイルが
+見つかりません」と誤ったエラーを表示し、原因切り分けを難しくしていた。
+
+### 原因 (INC-005)
+
+**問題1: `&&` の誤解釈**。`az` はWindows上では `az.cmd` であり、PowerShellから
+`--command "sh -c 'rm -rf ... && tar -xzf ... && echo done'"` のような `&&` を含む文字列を
+渡すと、cmd.exe層で `&&` がコマンド区切り文字として誤解釈される。結果、閉じ引用符のない
+壊れたコマンド(`sh -c 'rm -rf ...`)だけがコンテナーに届き、`rm` が欠落して
+`-rf` がシェル名(`$0`)として扱われ構文エラーになる。分断された後半部分
+(`tar -xzf ... && echo done'`)はローカルで無害に評価されるため `$LASTEXITCODE` が偶然0になり、
+スクリプトが失敗に気づけない。
+
+**問題2: `az containerapp exec` のレート制限**。このセッション中に `az containerapp exec`
+(`ss -tnp`、`rcon-cli stop`、`save-all flush` など)を短時間に多用した結果、プラットフォーム側の
+ exec/SSHエンドポイントが429でレート制限された。`retry-after`ヘッダーの値より実際の回復に
+は長くかかる場合がある。
+
+### 解決策 (INC-005)
+
+**問題1への対応**: `sh -c '複合コマンド'` のような `&&`/パイプ/入れ子引用符を含む
+文字列を一切使わず、**単純なコマンドを1つずつ個別のexec呼び出しに分割する** よう修正した
+(`rm`や`tar`は複数引数を直接受け付けられるためシェルの`&&`は不要)。世代管理の
+`ls | tail | xargs` パイプ処理も、一覧取得のみexecで行い、上位N件の判定と削除対象の
+挙出はPowerShell側で行うように変更した。
+
+**問題2への対応**: `Invoke-ContainerAppExecCommand` ヘルパーを新設し、exec失敗時に出力に
+`429`/`Too Many Requests` が含まれていればレート制限である旨を明示するようにした。これにより
+「ファイルが見つからない」などの誤ったエラーで悩まされることがなくなった。
+
+### 確認した安全性
+
+失敗後も `status-server.ps1` でサーバー本体・ワールドデータに影響がないことを確認した。
+`restore-world.ps1` は「存在確認」ステップで失敗する仕様なので、破壊的な `rm -rf` は
+一度も実行されていなかった。修正後はレート制限が解除された後の再試行で復元が成功した。
+
+### 対応した恒久対策 (INC-005)
+
+| 対象 | 変更内容 |
+| --- | --- |
+| `scripts/lib/containerapp.ps1` | `Invoke-ContainerAppExecCommand` を追加。exec失敗時に429/レート制限を検知して明示する |
+| `scripts/restore-world.ps1` | `sh -c '複合コマンド'` を廃止し、`ls`→`rm -rf`→`tar -xzf`→`ls` の単純コマンド4つに分割。`-BackupFileName` は `Split-Path -Leaf` でファイル名/フルパスどちらも受け付けるよう修正 |
+| `scripts/backup-world.ps1` | 同様に `mkdir -p && tar -czf`、`ls\|tail\|xargs` を廃止し、世代管理ロジックをPowerShell側に移動 |
+| `scripts/stop-server.ps1` | `rcon-cli save-all flush` 呼び出しも `Invoke-ContainerAppExecCommand` 経由に統一 |
+| `docs/backup-restore.md` | `-BackupFileName` はファイル名・フルパスどちらも可である旨を注記 |
+
+---
+
 ## 横断的な学び
 
 ### 1. 「接続できた」は「正常」を意味しない
@@ -254,3 +453,26 @@ NFS移行 (Premium FileStorage / 最小100GiB) はコスト影響が大きかっ
 - ファイル共有の `enabledProtocols` (作成時のみ指定可能)
 
 いずれもリソースの作り直しが必要になるため、初期設計時に決め切ることが望ましい。
+
+### 8. プラットフォームの「復旧操作」自体が新たな競合を生みうる
+
+INC-002の教訓を踏まえて `minReplicas` 変更は避けていても、`revision restart` のような
+一見無害な単一コマンドが同じ排他ロック競合を引き起こすことがある(INC-003)。
+ステートフルな単一インスタンスアプリでは、「稼働中のレプリカに対して何かを再起動・更新する」
+操作全般を疑い、実行前に「新旧が一時的に共存しうるか」を確認する。
+
+### 9. スケール制御が信用できないときは、スケールルールを迂回する経路を用意する
+
+TCPスケールルールは外部要因(プラットフォーム側のコネクション追跡)で固着することがあり
+(INC-004)、`scaleCooldownSeconds` 等のパラメーター調整では解決できない。
+自動スケーリングに完全依存せず、`revision deactivate`/`activate` のような
+スケールルールを経由しない確実な停止・起動手段を運用スクリプト側に用意しておくと、
+原因調査中でも復旧を止められる。
+
+### 10. PowerShellからWindows版のCLIラッパー(`.cmd`)にシェルメタ文字を渡さない
+
+`az`のような`.cmd`ラッパー経由のコマンドに `&&`・`|`・入れ子引用符を含む文字列を渡すと、
+ cmd.exe層で誤解釈され、一部が欠落したまま実行されても `$LASTEXITCODE` は成功として
+返ってくることがある(INC-005)。対策は「シェルの組み立てを必要としない単純なコマンドの
+連続実行」に分解すること。結果の検証は終了コードだけではなく、必ず実際の出力内容(ファイルの
+存在や内容)で行う。
