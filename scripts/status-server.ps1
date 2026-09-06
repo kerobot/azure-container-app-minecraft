@@ -38,7 +38,8 @@ try {
     $app = Get-ContainerAppInfo -ResourceGroupName $ResourceGroupName -AppName $AppName
     Write-RevisionMismatchWarning -AppInfo $app
 
-    $replicas = Get-ContainerAppReplicas -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision
+    # 関数が空配列を返すとパイプラインで$nullに巻き戻されるため@()で強制的に配列として受け取る
+    $replicas = @(Get-ContainerAppReplicas -ResourceGroupName $ResourceGroupName -AppName $AppName -RevisionName $app.ActiveRevision)
     $runningCount = @($replicas | Where-Object { $_.properties.runningState -eq 'Running' }).Count
 
     $status = [PSCustomObject]@{
