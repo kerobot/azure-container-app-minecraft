@@ -75,6 +75,10 @@ jobs:
 
       # バージョン更新前に必ずバックアップを取得し、失敗時に復元できるようにする。
       # そのうえで停止しておかないと、新旧リビジョンがワールドの session.lock を奪い合う。
+      # backup-world.ps1 は save-all flush を行わない (ワールド保存は直後の stop-server.ps1 に一本化)。
+      # GitHub Actionsの非対話環境で az containerapp exec を短時間に多用すると
+      # レート制限(429)や rcon-cli の実行失敗を招くため、exec呼び出し回数を最小限にする
+      # (docs/incident-records.md のINC-005を参照)。
       - name: Backup and stop server before version update
         shell: pwsh
         timeout-minutes: 20

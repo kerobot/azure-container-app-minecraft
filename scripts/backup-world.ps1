@@ -4,8 +4,10 @@
     Minecraftワールドデータのバックアップを作成します。
 
 .DESCRIPTION
-    実行中のコンテナー内で save-all flush を行った後、/data配下のワールド・設定・
-    ホワイトリスト・operator情報を /data/backups 配下へtar.gzとして世代管理付きで保存します。
+    実行中のコンテナー内で /data配下のワールド・設定・ホワイトリスト・operator情報を
+    /data/backups 配下へtar.gzとして世代管理付きで保存します。ワールドの保存(flush)は
+    行いません。事前に flush が必要な場合は呼び出し側で stop-server.ps1 等を使ってください
+    (az containerapp exec のレート制限を避けるため、このスクリプトではflushを実行しません)。
     -DryRun を指定すると実際のコマンドは実行せず、実行予定の内容のみ表示します。
 
 .PARAMETER ResourceGroupName
@@ -67,27 +69,16 @@ try {
     # (docs/incident-records.md のINC-005を参照)。そのため単純なコマンド1つずつをexecで実行する。
     $mkdirCommand = 'mkdir -p /data/backups'
     $tarCommand = "tar -czf /data/backups/$backupName.tar.gz -C /data world world_nether world_the_end whitelist.json ops.json server.properties"
-    $saveCommand = 'rcon-cli save-all flush'
 
     if ($DryRun -or -not $PSCmdlet.ShouldProcess($AppName, "バックアップ作成 ($backupName)")) {
         Write-Host '(DryRun) 以下のコマンドを順に実行予定です:' -ForegroundColor Yellow
-        Write-Host "  1. $saveCommand"
-        Write-Host "  2. $mkdirCommand"
-        Write-Host "  3. $tarCommand"
+        Write-Host "  1. $mkdirCommand"
+        Write-Host "  2. $tarCommand"
         if ($RetentionCount -gt 0) {
-            Write-Host "  4. 世代整理 (最新 $RetentionCount 件を保持し、それより古いものを削除)"
+            Write-Host "  3. 世代整理 (最新 $RetentionCount 件を保持し、それより古いものを削除)"
         }
         exit 0
     }
-
-    Write-Host 'ワールドデータをフラッシュ保存しています...' -ForegroundColor Cyan
-    try {
-        Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $saveCommand | Out-Null
-    }
-    catch {
-        Write-Warning "save-all flushに失敗しました。コンテナーの自動セーブに委ねてバックアップを続行します: $($_.Exception.Message)"
-    }
-    Start-Sleep -Seconds 10
 
     Write-Host "バックアップを作成しています: $backupName.tar.gz" -ForegroundColor Cyan
     Invoke-ContainerAppExecCommand -ResourceGroupName $ResourceGroupName -AppName $AppName -ReplicaName $runningReplica.name -Command $mkdirCommand | Out-Null

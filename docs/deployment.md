@@ -262,18 +262,20 @@ az ad app federated-credential delete --id $APP_ID --federated-credential-id git
 
 ### 2-2. GitHub リポジトリ設定
 
-#### Secrets (リポジトリ or Environment単位)
+#### 確認方法
 
 ```powershell
-# AzureテナントIDの確認方法
+# AzureテナントID
 az account show --query tenantId -o tsv
 
-# サブスクリプションIDの確認方法
+# サブスクリプションID
 az account show --query id -o tsv
 
 # OIDC用アプリケーションID（Client ID）
 az ad app list --display-name "gh-azure-container-app-minecraft" --query "[0].appId" -o tsv
 ```
+
+#### Secrets (リポジトリ or Environment単位)
 
 | 名称 | 用途 |
 | --- | --- |
