@@ -84,7 +84,7 @@ jobs:
           $status = ./scripts/status-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME | Out-String
           Write-Host $status
           if ($status -match 'RunningRepl\s*:\s*[1-9]') {
-            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -Force
+            ./scripts/stop-server.ps1 -ResourceGroupName $env:RESOURCE_GROUP -AppName $env:APP_NAME -SkipSave -Force
           }
 
       - name: Deploy Bicep with updated Minecraft version
