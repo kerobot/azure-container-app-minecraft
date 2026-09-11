@@ -199,27 +199,63 @@ $APP_ID = az ad app list --display-name "gh-azure-container-app-minecraft" --que
 # サービスプリンシパル作成
 az ad sp create --id "$APP_ID"
 
-# 最小権限のロール割り当て (対象リソースグループへのContributor)
+# リソースグループの作成（ロール割り当てのため先に作成しておく）
+az group create `
+  --name rg-minecraft-dev `
+  --location japaneast
+
+# 最小権限のロール割り当て (対象リソースグループのみへのContributor)
 az role assignment create `
   --assignee "$APP_ID" `
   --role "Contributor" `
   --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
 
 # フェデレーション資格情報の追加 (mainブランチからのデプロイを許可する例)
-az ad app federated-credential create --id "$APP_ID" --parameters '{
+$jsonFile = Join-Path $env:TEMP "github-main-federated-credential.json"
+
+# owner_id と repo_id は GitHub リポジトリの Settings → Actions → OIDC から確認可能
+@'
+{
   "name": "github-main",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:kerobot/azure-container-app-minecraft:ref:refs/heads/main",
-  "audiences": ["api://AzureADTokenExchange"]
-}'
+  "subject": "repo:kerobot@<owner_id>/azure-container-app-minecraft@<repo_id>:ref:refs/heads/main",
+  "description": "GitHub Actions main branch",
+  "audiences": [
+    "api://AzureADTokenExchange"
+  ]
+}
+'@ | Set-Content -Path $jsonFile -Encoding UTF8
+
+az ad app federated-credential create --id $APP_ID --parameters "@$jsonFile"
+
+Remove-Item $tempFile
 
 # environment: dev / prod からの実行を許可する場合
-az ad app federated-credential create --id "$APP_ID" --parameters '{
+$jsonFile = Join-Path $env:TEMP "github-env-dev.json"
+
+@'
+{
   "name": "github-env-dev",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:kerobot/azure-container-app-minecraft:environment:dev",
-  "audiences": ["api://AzureADTokenExchange"]
-}'
+  "subject": "repo:kerobot@<owner_id>/azure-container-app-minecraft@<repo_id>:environment:dev",
+  "description": "GitHub Actions development environment deployment",
+  "audiences": [
+    "api://AzureADTokenExchange"
+  ]
+}
+'@ | Set-Content -Path $jsonFile -Encoding UTF8
+
+az ad app federated-credential create --id $APP_ID --parameters "@$jsonFile"
+
+Remove-Item $jsonFile
+
+# フェデレーション資格情報を確認する場合
+
+az ad app federated-credential list --id $APP_ID --output table
+
+# フェデレーション資格情報を削除する場合
+
+az ad app federated-credential delete --id $APP_ID --federated-credential-id github-env-dev
 ```
 
 `prod` 環境についても同様に `environment:prod` のフェデレーション資格情報を追加してください。
@@ -227,6 +263,17 @@ az ad app federated-credential create --id "$APP_ID" --parameters '{
 ### 2-2. GitHub リポジトリ設定
 
 #### Secrets (リポジトリ or Environment単位)
+
+```powershell
+# AzureテナントIDの確認方法
+az account show --query tenantId -o tsv
+
+# サブスクリプションIDの確認方法
+az account show --query id -o tsv
+
+# OIDC用アプリケーションID（Client ID）
+az ad app list --display-name "gh-azure-container-app-minecraft" --query "[0].appId" -o tsv
+```
 
 | 名称 | 用途 |
 | --- | --- |
