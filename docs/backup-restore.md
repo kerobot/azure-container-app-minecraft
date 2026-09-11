@@ -4,14 +4,14 @@
 
 ワールドデータの整合性を保つため、以下の順序でバックアップを取得します。
 
-1. `/data` 配下の `world` / `world_nether` / `world_the_end` / `whitelist.json` /
+1. `rcon-cli save-all flush` を実行し、メモリ上の変更をディスクへ強制フラッシュする
+2. 数秒〜十数秒待機し、ディスクI/Oの完了を待つ
+3. `/data` 配下の `world` / `world_nether` / `world_the_end` / `whitelist.json` /
    `ops.json` / `server.properties` を tar.gz として `/data/backups/` へアーカイブする
 
-`backup-world.ps1` は `save-all flush` を行いません。GitHub Actionsなどの非対話環境で
-`az containerapp exec` を短時間に多用するとレート制限(429)や `rcon-cli` の実行失敗を
-招くためです (`docs/incident-records.md` のINC-005を参照)。ワールドの明示的なフラッシュが
-必要な場合は、バックアップの前後で `stop-server.ps1` を使ってサーバーを停止してください
-(停止処理の中で `save-all flush` を実行します)。
+サーバー稼働中でも `save-all flush` によって概ね安全にバックアップを取得できますが、
+より厳密な整合性を求める場合は、サーバー停止中(`stop-server.ps1` 実行後)に
+バックアップすることを推奨します。
 
 > 注意: ファイル共有はNFS 4.1で構成しているため、`az storage file` や AzCopy などの
 > REST API経由の操作は利用できません (アカウントキーアクセスも無効です)。
